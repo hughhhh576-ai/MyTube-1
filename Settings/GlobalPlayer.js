@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, ActivityIndicator, Image, LogBox } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video'; // expo-av থেকে expo-video তে পরিবর্তন
-import { Audio } from 'expo-av'; // সিঙ্ক অডিওর জন্য আপাতত রাখা হলো
+import { Video, Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -22,38 +21,31 @@ const getNumericQuality = (q) => {
 
 export default function GlobalPlayer() {
   const navigation = useNavigation();
-  const syncAudioRef = useRef(new Audio.Sound()); 
+  const videoRef = useRef(null);
 
-  const seekPosRef = useRef(0);
   const currentVideoIdRef = useRef(null);
   const isLocalRef = useRef(false);
-  const isAudioModeRef = useRef(false); 
 
-  const [currentQuality, setCurrentQuality] = useState(global.appSettings?.normalVideo || '720p');
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
-  const [streamMode, setStreamMode] = useState('combined'); 
 
   const [isPlaying, setIsPlaying] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
   const [isAudioMode, setIsAudioMode] = useState(false);
-  const [isSwitching, setIsSwitching] = useState(false); 
+  const [videoKey, setVideoKey] = useState(Date.now().toString());
 
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
-  // expo-video Player instance
-  const player = useVideoPlayer(streamUrl, (p) => {
-    p.loop = false;
-    p.staysActiveInBackground = isAudioModeRef.current;
-    if (isPlaying) p.play();
-  });
-
-  const checkIsMuxed = () => {
-      if (isLocalRef.current) return true; 
-      global.appSettings = global.appSettings || {};
-      const currentQNum = parseInt(getNumericQuality(global.appSettings.normalVideo || '720'));
-      return [360, 480, 720].includes(currentQNum) || streamMode === 'combined';
+  const setBackgroundAudio = async (enable) => {
+    try {
+        await Audio.setAudioModeAsync({
+            staysActiveInBackground: enable,
+            playsInSilentModeIOS: true,
+            shouldDuckAndroid: true,
+            playThroughEarpieceAndroid: false,
+        });
+    } catch (e) {}
   };
 
   const fetchStreamUrl = async (vidId, targetQuality) => {
@@ -65,22 +57,11 @@ export default function GlobalPlayer() {
       const json = await res.json();
 
       if (json.success && json.url) {
-          setStreamMode(json.streamType || 'combined');
           setStreamUrl(json.url);
-          
-          // প্লেয়ারে নতুন URL সেট করা
-          player.replace(json.url);
-
-          if (json.streamType === 'manifest' || (json.streamType === 'separate' && json.audioUrl)) {
-              // আলাদা অডিও সিঙ্কিং লজিক (যদি প্রয়োজন হয়)
-              try { await syncAudioRef.current.unloadAsync(); } catch(e) {}
-          }
-
           setIsPlaying(true);
-          player.play();
           setErrorMsg(null);
       } else {
-          setErrorMsg("This quality video is not available");
+          setErrorMsg("এই ভিডিওটি প্লে করা যাচ্ছে না।");
       }
     } catch(e) { 
       setErrorMsg("সার্ভার কানেকশন এরর!");
@@ -89,23 +70,31 @@ export default function GlobalPlayer() {
 
   useEffect(() => {
     const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
+      const isAudio = data.videoData?.type === 'audio';
+
       if (videoData?.id === data.videoId) {
         setPlayerState('full');
+        setIsAudioMode(isAudio);
+        await setBackgroundAudio(isAudio);
         return; 
       }
-      
+
+      setIsAudioMode(isAudio);
+      await setBackgroundAudio(isAudio); 
+
       currentVideoIdRef.current = data.videoId;
       isLocalRef.current = !!(data.videoData && data.videoData.localUri);
+
       setVideoData(data.videoData);
       setPlayerState('full');
       setStreamUrl(null);
       setErrorMsg(null);
       setIsPlaying(true);
+      pan.setValue({ x: 0, y: 0 });
+      setVideoKey(Date.now().toString());
 
       if (isLocalRef.current) {
-          setStreamMode('combined');
           setStreamUrl(data.videoData.localUri);
-          player.replace(data.videoData.localUri);
           return;
       }
 
@@ -113,13 +102,16 @@ export default function GlobalPlayer() {
       await fetchStreamUrl(data.videoId, targetQuality);
     });
 
-    const stopSub = DeviceEventEmitter.addListener('stopVideo', () => {
-      player.pause();
+    const stopSub = DeviceEventEmitter.addListener('stopVideo', async () => {
+      await setBackgroundAudio(false); 
+      if (videoRef.current) { try { await videoRef.current.pauseAsync(); } catch(e){} }
       setPlayerState('hidden');
+      setStreamUrl(null);
+      setIsPlaying(false);
     });
 
     return () => { playSub.remove(); stopSub.remove(); };
-  }, [videoData, player]);
+  }, [videoData]);
 
   const panResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -153,36 +145,47 @@ export default function GlobalPlayer() {
                       <Text style={{color: '#FF4444', marginTop: 10, fontSize: isFull ? 16 : 12, textAlign: 'center'}}>{errorMsg}</Text>
                   </View>
                ) : streamUrl ? (
-                  <VideoView
-                    player={player}
-                    style={styles.video}
-                    allowsFullscreen
-                    allowsPictureInPicture
-                    contentFit={isFull ? "contain" : "cover"}
-                  />
+                  <View style={styles.videoCoreWrapper}>
+                    <Video 
+                      key={videoKey} 
+                      ref={videoRef} 
+                      source={{ uri: streamUrl }} 
+                      style={styles.video} 
+                      shouldPlay={isPlaying} 
+                      useNativeControls={isFull && (!isAudioMode || isLocalRef.current)} 
+                      resizeMode={isFull ? "contain" : "cover"} 
+                    />
+                  </View>
                ) : (
                   <View style={styles.loadingBox}><ActivityIndicator size={isFull ? "large" : "small"} color="#FF0000" /></View>
                )}
 
                {showCustomPoster && (
                   <View style={styles.audioPosterContainer}>
-                    <Image source={{ uri: videoData?.thumbnail }} style={styles.audioPosterBg} blurRadius={15} />
+                    <Image source={{ uri: videoData?.thumbnail }} style={styles.audioPosterBg} blurRadius={isFull ? 15 : 5} />
                     <View style={styles.audioPosterOverlay}>
+                      <View style={[styles.audioIconCircle, !isFull && { width: 40, height: 40, borderRadius: 20 }]}>
                         <Ionicons name="musical-notes" size={isFull ? 50 : 20} color="#FFF" />
+                      </View>
                     </View>
                   </View>
                )}
 
                {!isFull && (
                   <View style={styles.overlay}>
-                     <TouchableOpacity style={styles.miniPlayBtn} onPress={() => {
-                         if (player.playing) { player.pause(); setIsPlaying(false); }
-                         else { player.play(); setIsPlaying(true); }
+                     <TouchableOpacity style={styles.miniPlayBtn} onPress={async () => {
+                         if (videoRef.current) {
+                             const status = await videoRef.current.getStatusAsync();
+                             if (status?.isPlaying) { await videoRef.current.pauseAsync(); setIsPlaying(false); } 
+                             else { await videoRef.current.playAsync(); setIsPlaying(true); }
+                         }
                      }}>
                         <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#FFF" />
                      </TouchableOpacity>
-                     <TouchableOpacity style={styles.miniCloseBtn} onPress={() => {
-                         player.pause(); setPlayerState('hidden');
+                     <TouchableOpacity style={styles.miniCloseBtn} onPress={async () => {
+                         await setBackgroundAudio(false); 
+                         if (videoRef.current) { try { await videoRef.current.pauseAsync(); } catch(e){} }
+                         setPlayerState('hidden'); setStreamUrl(null); pan.setValue({ x:0, y:0 });
                      }}>
                         <Ionicons name="close" size={24} color="#FFF" />
                      </TouchableOpacity>
@@ -197,15 +200,17 @@ export default function GlobalPlayer() {
 const styles = StyleSheet.create({
   fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
   miniContainer: { position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', zIndex: 9999, elevation: 15, borderRadius: 12, overflow: 'hidden' },
-  touchable: { flex: 1 },
-  fullVideoWrapper: { flex: 1, backgroundColor: '#000' },
-  miniVideoWrapper: { flex: 1, backgroundColor: '#111', borderRadius: 12, overflow: 'hidden' },
+  touchable: { flex: 1, width: '100%', height: '100%' },
+  fullVideoWrapper: { flex: 1, backgroundColor: '#000', width: '100%', height: '100%' },
+  miniVideoWrapper: { flex: 1, width: '100%', height: '100%', backgroundColor: '#111', borderRadius: 12, overflow: 'hidden' },
+  videoCoreWrapper: { flex: 1, width: '100%', height: '100%' },
   video: { width: '100%', height: '100%' },
   loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  audioPosterContainer: { ...StyleSheet.absoluteFillObject, zIndex: 10 },
-  audioPosterBg: { width: '100%', height: '100%' },
+  audioPosterContainer: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 },
+  audioPosterBg: { width: '100%', height: '100%', resizeMode: 'cover' },
   audioPosterOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  audioIconCircle: { width: 90, height: 90, borderRadius: 45, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.5)' },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', zIndex: 20 },
   miniPlayBtn: { width: 45, height: 45, borderRadius: 25, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
   miniCloseBtn: { position: 'absolute', top: 5, right: 5, width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' }
 });
