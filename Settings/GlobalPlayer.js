@@ -1,11 +1,16 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, ActivityIndicator, Image, LogBox, Modal } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, Image, LogBox, Modal } from 'react-native';
 import { Video, Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 
-LogBox.ignoreLogs(['[expo-av] Expo AV has been deprecated']);
+LogBox.ignoreLogs([
+    '[expo-av] Expo AV has been deprecated',
+    '[expo-av]: Video component from `expo-av` is deprecated',
+    'Video component from `expo-av` is deprecated'
+]);
 
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16;
@@ -76,9 +81,8 @@ export default function GlobalPlayer() {
         if (currentCC) {
             const currentSec = status.positionMillis / 1000;
             const sub = currentCC.find(s => currentSec >= s.start && currentSec <= s.end);
-            // সাবটাইটেল থাকলে দেখাবে, না থাকলে আগের টেক্সট ক্লিয়ার করবে না যদি লোডিং মেসেজ থাকে
             if (sub) setCcText(sub.text);
-            else if (!ccText.includes("CC")) setCcText(""); 
+            else if (!ccText.includes("CC")) setCcText("");
         }
 
         if (streamMode === 'separate' && !isAudioMode) {
@@ -101,6 +105,8 @@ export default function GlobalPlayer() {
       currentVideoIdRef.current = data.videoId;
       isLocalRef.current = !!(data.videoData && data.videoData.localUri);
       setVideoData(data.videoData);
+      
+      // নতুন ভিডিও প্লে করার সময় প্লেয়ারকে আবার ফুল স্ক্রিন করা
       setPlayerState('full');
       setStreamUrl(null);
       setIsAudioMode(false);
@@ -155,10 +161,9 @@ export default function GlobalPlayer() {
     return () => { playSub.remove(); toggleAudioSub.remove(); minSub.remove(); maxSub.remove(); qualitySub.remove(); };
   }, [streamMode]);
 
-  // [UPDATED]: ট্রান্সলেশন লোডিং মেসেজ এবং এরর হ্যান্ডেলিং
   const fetchCC = async (langCode) => {
     try {
-        setCcText("Loading CC..."); // লোডিং মেসেজ
+        setCcText(`[${langCode.toUpperCase()}] CC Loading...`);
         setShowSettings(false);
 
         const res = await fetch(`${MY_API_SERVER}/api/subtitles?id=${currentVideoIdRef.current}&lang=${langCode}`);
@@ -169,7 +174,7 @@ export default function GlobalPlayer() {
             setCcText(`[${langCode.toUpperCase()}] CC Ready`);
             setTimeout(() => setCcText(""), 2000);
         } else {
-            setCcText("CC not available for this video");
+            setCcText(`[${langCode.toUpperCase()}] CC Not Found`);
             setTimeout(() => setCcText(""), 3000);
         }
     } catch(e) { 
@@ -183,6 +188,12 @@ export default function GlobalPlayer() {
     if (videoRef.current) await videoRef.current.setRateAsync(speed, true);
     if (syncAudioRef.current) await syncAudioRef.current.setRateAsync(speed, true);
     setShowSettings(false);
+  };
+
+  // [NEW]: ব্যাক বাটনে চাপ দিলে হোম স্ক্রিনে যাওয়া এবং প্লেয়ার ছোট করার লজিক
+  const handleBackPress = () => {
+    setPlayerState('mini'); 
+    navigation.navigate('Home'); 
   };
 
   const panResponder = useRef(PanResponder.create({
@@ -240,6 +251,14 @@ export default function GlobalPlayer() {
                     <View style={styles.ccOverlay}><Text style={styles.ccTextStyle}>{ccText}</Text></View>
                 )}
 
+                {/* [NEW]: ব্যাক বাটন (বাম দিকে) */}
+                {isFull && (
+                    <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
+                        <Ionicons name="arrow-back" size={28} color="#FFF" />
+                    </TouchableOpacity>
+                )}
+
+                {/* সেটিংস বাটন (ডান দিকে) */}
                 {isFull && (
                     <TouchableOpacity style={styles.settingsIcon} onPress={() => { setSettingsTab('main'); setShowSettings(true); }}>
                         <Ionicons name="settings-sharp" size={24} color="#FFF" />
@@ -304,7 +323,8 @@ const styles = StyleSheet.create({
   miniContainer: { position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', zIndex: 9999, borderRadius: 12, overflow: 'hidden', elevation: 15, shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 5 },
   videoWrapper: { flex: 1, position: 'relative' },
   video: { width: '100%', height: '100%' },
-  settingsIcon: { position: 'absolute', top: 10, right: 10, zIndex: 100 },
+  backButton: { position: 'absolute', top: 10, left: 10, zIndex: 100, padding: 5 }, // [NEW] ব্যাক বাটনের ডিজাইন
+  settingsIcon: { position: 'absolute', top: 10, right: 10, zIndex: 100, padding: 5 },
   audioPosterContainer: { ...StyleSheet.absoluteFillObject, zIndex: 10 },
   audioPosterBg: { width: '100%', height: '100%', resizeMode: 'cover' },
   audioPosterOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
