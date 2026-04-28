@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 
-// expo-av এর সব ধরনের বিরক্তিকর হলুদ Warning চিরতরে হাইড করা হলো
 LogBox.ignoreLogs([
     '[expo-av] Expo AV has been deprecated',
     '[expo-av]: Video component from `expo-av` is deprecated',
@@ -175,20 +174,24 @@ export default function GlobalPlayer() {
     return () => { playSub.remove(); toggleAudioSub.remove(); minSub.remove(); maxSub.remove(); qualitySub.remove(); };
   }, [streamMode]);
 
-  const fetchCC = async (langCode) => {
+  // [UPDATED]: শুধুমাত্র বাংলা ফেচ করার ফাংশন
+  const fetchCC = async () => {
     try {
-        setCcText(`[${langCode.toUpperCase()}] CC Loading...`);
+        setCcText(`Loading Bengali CC...`);
         setShowSettings(false);
-        const res = await fetch(`${MY_API_SERVER}/api/subtitles?id=${currentVideoIdRef.current}&lang=${langCode}`);
+        const res = await fetch(`${MY_API_SERVER}/api/subtitles?id=${currentVideoIdRef.current}`);
         const json = await res.json();
         if (json.success && json.subtitles.length > 0) {
             setCurrentCC(json.subtitles);
             setCcText("");
         } else {
-            setCcText(`[${langCode.toUpperCase()}] CC Not Found`);
+            setCcText(`Bengali CC Not Found`);
             setTimeout(() => setCcText(""), 3000);
         }
-    } catch(e) { setCcText(""); }
+    } catch(e) { 
+        setCcText("Failed to load CC");
+        setTimeout(() => setCcText(""), 3000);
+    }
   };
 
   const changeSpeed = async (speed) => {
@@ -261,7 +264,6 @@ export default function GlobalPlayer() {
 
             {!isFull && (
                 <View style={styles.miniOverlay}>
-                    {/* [NEW]: মিনি প্লেয়ারে ক্লিক করে বড় করার আলাদা বাটন */}
                     <TouchableOpacity style={{flex: 1, height: '100%', justifyContent: 'center', alignItems: 'center'}} onPress={() => {
                         if (videoData) {
                             navigation.navigate('Player', { videoId: currentVideoIdRef.current, videoData });
@@ -275,7 +277,6 @@ export default function GlobalPlayer() {
                         <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#FFF" />
                     </TouchableOpacity>
 
-                    {/* [FIXED]: ক্রস বাটনে চাপ দিলে ভিডিওর সাথে অডিও-ও বন্ধ হবে */}
                     <TouchableOpacity onPress={async () => {
                         await setBackgroundAudio(false);
                         if (videoRef.current) await videoRef.current.unloadAsync().catch(()=>{});
@@ -290,30 +291,32 @@ export default function GlobalPlayer() {
             )}
         </View>
 
-        {/* [RESTORED]: ভুলবশত মুছে যাওয়া ভাষা এবং স্পিড সিলেক্ট করার অপশন ফিরিয়ে আনা হলো */}
         <Modal visible={showSettings} transparent animationType="fade">
             <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowSettings(false)}>
                 <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
                     {settingsTab === 'main' && (
                         <>
-                            <TouchableOpacity style={styles.menuItem} onPress={() => setSettingsTab('cc')}>
-                                <Ionicons name="chatbubble-ellipses-outline" size={20} color="#FFF" />
-                                <Text style={styles.menuText}>CC (Captions)</Text>
+                            {/* [UPDATED]: সরাসরি বাংলা CC অন/অফ করার বাটন */}
+                            <TouchableOpacity style={styles.menuItem} onPress={() => {
+                                if (currentCC) {
+                                    setCurrentCC(null);
+                                    setCcText("");
+                                    setShowSettings(false);
+                                } else {
+                                    fetchCC();
+                                }
+                            }}>
+                                <Ionicons name="chatbubble-ellipses-outline" size={20} color={currentCC ? "#4CAF50" : "#FFF"} />
+                                <Text style={[styles.menuText, currentCC && {color: '#4CAF50'}]}>
+                                    {currentCC ? "Turn Off Bengali CC" : "Turn On Bengali CC"}
+                                </Text>
                             </TouchableOpacity>
+
                             <TouchableOpacity style={styles.menuItem} onPress={() => setSettingsTab('speed')}>
                                 <Ionicons name="speedometer" size={20} color="#FFF" />
                                 <Text style={styles.menuText}>Playback Speed ({playbackSpeed}x)</Text>
                             </TouchableOpacity>
                         </>
-                    )}
-                    {settingsTab === 'cc' && (
-                        ['bn', 'hi', 'en', 'ur'].map(lang => (
-                            <TouchableOpacity key={lang} style={styles.menuItem} onPress={() => fetchCC(lang)}>
-                                <Text style={styles.menuText}>
-                                    {lang === 'bn' ? 'Bengali' : lang === 'hi' ? 'Hindi' : lang === 'en' ? 'English' : 'Urdu'}
-                                </Text>
-                            </TouchableOpacity>
-                        ))
                     )}
                     {settingsTab === 'speed' && (
                         [0.25, 0.5, 1.0, 1.5, 2.0].map(s => (
