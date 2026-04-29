@@ -14,7 +14,9 @@ export default function ChannelScreen() {
   const route = useRoute();
   const isFocused = useIsFocused();
 
-  const { channelData = {}, channelName: paramChannelName, channelAvatar: paramAvatar } = route.params || {};
+  // এখানে route.params থেকে channelUrl রিসিভ করা হচ্ছে
+  const { channelData = {}, channelName: paramChannelName, channelAvatar: paramAvatar, channelUrl: paramChannelUrl } = route.params || {};
+  
   const channelName = channelData?.channel || paramChannelName || 'YouTube Channel';
   const channelAvatar = channelData?.avatar || paramAvatar || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
 
@@ -58,14 +60,8 @@ export default function ChannelScreen() {
         const thumbs = thumbnailsObject.thumbnails;
         const selectedThumb = thumbQuality === 'Data Saver' ? thumbs[0] : thumbs[thumbs.length - 1];
         let url = selectedThumb.url;
-        
-        if (url.startsWith('//')) {
-          url = 'https:' + url;
-        }
-        
-        if(url.includes('?')) {
-            url = url.split('?')[0];
-        }
+        if (url.startsWith('//')) url = 'https:' + url;
+        if(url.includes('?')) url = url.split('?')[0];
         return url;
       }
       return null;
@@ -80,9 +76,7 @@ export default function ChannelScreen() {
       const videoId = vid.videoId;
 
       let thumbnailUrl = getThumbnail(vid.thumbnail);
-      if (!thumbnailUrl) {
-         thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-      }
+      if (!thumbnailUrl) thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 
       return {
         id: String(videoId),
@@ -114,18 +108,11 @@ export default function ChannelScreen() {
         const videoId = node.reelItemRenderer.videoId;
 
         let shortThumbnailUrl = getThumbnail(node.reelItemRenderer.thumbnail);
-        if (!shortThumbnailUrl) {
-            shortThumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-        }
+        if (!shortThumbnailUrl) shortThumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 
         categorizedData.Shorts.push({
-          id: String(videoId), 
-          title: String(title),
-          views: String(views),
-          thumbnail: shortThumbnailUrl,
-          channel: channelName, 
-          avatar: channelAvatar, 
-          duration: 'Short'
+          id: String(videoId), title: String(title), views: String(views),
+          thumbnail: shortThumbnailUrl, channel: channelName, avatar: channelAvatar, duration: 'Short'
         });
       } else {
         Object.values(node).forEach(child => extractChannelDataRecursively(child, categorizedData, tabType));
@@ -136,53 +123,48 @@ export default function ChannelScreen() {
   const fetchChannelData = async () => {
     setLoading(true);
     try {
-      const searchResponse = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
-      const searchHtml = await searchResponse.text();
-      let searchMatch = searchHtml.match(/ytInitialData\s*=\s*({.+?});/) || searchHtml.match(/var ytInitialData = (.*?);<\/script>/);
+      // প্রথমে চেক করা হচ্ছে আগের স্ক্রিন থেকে সরাসরি লিংক এসেছে কিনা
+      let extractedChannelUrl = paramChannelUrl || channelData?.channelUrl || null;
 
-      let channelUrl = null;
+      // যদি সরাসরি লিংক না থাকে, শুধুমাত্র তখনই এটি নাম দিয়ে সার্চ করবে (Fallback logic)
+      if (!extractedChannelUrl) {
+          console.log("No Direct Link Found. Searching by Name...");
+          const searchResponse = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
+          const searchHtml = await searchResponse.text();
+          let searchMatch = searchHtml.match(/ytInitialData\s*=\s*({.+?});/) || searchHtml.match(/var ytInitialData = (.*?);<\/script>/);
 
-      if (searchMatch && searchMatch[1]) {
-        try {
-          const searchData = JSON.parse(searchMatch[1]);
-          
-          // অনেক বেশি স্মার্ট সার্চিং লজিক
-          const findChannelUrl = (node) => {
-            if (channelUrl) return; 
-            
-            // অপশন ১: যদি সরাসরি চ্যানেল রেজাল্ট পায়
-            if (node?.channelRenderer?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url) {
-               channelUrl = node.channelRenderer.navigationEndpoint.commandMetadata.webCommandMetadata.url;
-               return;
-            }
-            
-            // অপশন ২: যদি চ্যানেল না পায়, তবে সার্চে আসা প্রথম ভিডিওটির চ্যানেল লিংক নিয়ে নেবে!
-            if (node?.videoRenderer?.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url) {
-               channelUrl = node.videoRenderer.ownerText.runs[0].navigationEndpoint.commandMetadata.webCommandMetadata.url;
-               return;
-            }
-
-            if (node && typeof node === 'object') {
-              Object.values(node).forEach(child => findChannelUrl(child));
-            }
-          };
-          
-          findChannelUrl(searchData);
-        } catch (err) {
-           console.log("Search Parsing Error", err);
-        }
+          if (searchMatch && searchMatch[1]) {
+            try {
+              const searchData = JSON.parse(searchMatch[1]);
+              const findChannelUrl = (node) => {
+                if (extractedChannelUrl) return; 
+                if (node?.channelRenderer?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url) {
+                   extractedChannelUrl = node.channelRenderer.navigationEndpoint.commandMetadata.webCommandMetadata.url;
+                   return;
+                }
+                if (node?.videoRenderer?.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url) {
+                   extractedChannelUrl = node.videoRenderer.ownerText.runs[0].navigationEndpoint.commandMetadata.webCommandMetadata.url;
+                   return;
+                }
+                if (node && typeof node === 'object') {
+                  Object.values(node).forEach(child => findChannelUrl(child));
+                }
+              };
+              findChannelUrl(searchData);
+            } catch (err) {}
+          }
+      } else {
+          console.log("Using Direct Channel URL ->", extractedChannelUrl);
       }
 
-      console.log("Smartly Found Channel URL:", channelUrl); // টার্মিনালে চেক করার জন্য
-
-      if (!channelUrl) {
+      if (!extractedChannelUrl) {
         console.log("Error: Completely failed to extract channel URL.");
         setLoading(false);
         return; 
       }
 
-      let targetVideosUrl = `https://www.youtube.com${channelUrl}/videos`;
-      let targetShortsUrl = `https://www.youtube.com${channelUrl}/shorts`;
+      let targetVideosUrl = `https://www.youtube.com${extractedChannelUrl}/videos`;
+      let targetShortsUrl = `https://www.youtube.com${extractedChannelUrl}/shorts`;
 
       const [videosRes, shortsRes] = await Promise.all([
         fetch(targetVideosUrl, { headers: { 'User-Agent': DESKTOP_AGENT } }),
@@ -221,6 +203,15 @@ export default function ChannelScreen() {
 
       setVideoToken(categorizedData.VideosToken);
       setShortToken(categorizedData.ShortsToken);
+
+      const currentLiveVideo = categorizedData.Videos.find(v => v.isLive);
+      if (currentLiveVideo) {
+         setIsLiveChannel(true);
+         setLiveVideoData(currentLiveVideo);
+      } else {
+         setIsLiveChannel(false);
+         setLiveVideoData(null);
+      }
 
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
 
@@ -268,6 +259,22 @@ export default function ChannelScreen() {
     } catch (error) {} finally { setIsLoadingMore(false); }
   };
 
+  const handleSubscriptionToggle = async () => {
+    try {
+      const subs = await AsyncStorage.getItem('subscribedChannels');
+      let parsedSubs = subs ? JSON.parse(subs) : [];
+
+      if (isSubscribed) {
+        parsedSubs = parsedSubs.filter(sub => sub.name !== channelName);
+        setIsSubscribed(false);
+      } else {
+        parsedSubs.push({ id: Date.now().toString(), name: channelName, avatar: channelAvatar });
+        setIsSubscribed(true);
+      }
+      await AsyncStorage.setItem('subscribedChannels', JSON.stringify(parsedSubs));
+    } catch(e) {}
+  };
+
   const handleVideoPress = (item) => {
     DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: item });
     navigation.navigate('Player', { videoId: item.id, videoData: item });
@@ -298,9 +305,6 @@ export default function ChannelScreen() {
         <View style={styles.videoInfoContainer}>
           <TouchableOpacity activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
             <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
-            
-            {/* ডিবাগিং লিংক রিমুভ করে দিয়েছি যেহেতু এটি এখন কাজ করবে */}
-            
             <Text style={styles.videoMeta}>
               {item.views ? `${item.views}` : ''}
               {item.views && item.publishedTime ? ' • ' : ''}
@@ -330,14 +334,37 @@ export default function ChannelScreen() {
     <View>
       <Image source={{ uri: channelBanner }} style={styles.bannerImage} />
       <View style={styles.channelProfileSection}>
-        <View style={styles.avatarWrapper}>
+        <TouchableOpacity 
+          style={styles.avatarWrapper} 
+          activeOpacity={isLiveChannel ? 0.7 : 1} 
+          onPress={() => {
+            if (isLiveChannel && liveVideoData) {
+              DeviceEventEmitter.emit('playVideo', { videoId: liveVideoData.id, videoData: liveVideoData });
+              navigation.navigate('Player', { videoId: liveVideoData.id, videoData: liveVideoData });
+            }
+          }}
+        >
            <Image source={{ uri: channelAvatar }} style={styles.channelLogoLarge} />
-        </View>
+           {isLiveChannel && (
+             <View style={styles.liveBadge}>
+               <Text style={styles.liveBadgeText}>LIVE</Text>
+             </View>
+           )}
+        </TouchableOpacity>
+
         <View style={styles.channelTextInfo}>
           <Text style={styles.channelTitle}>{channelName}</Text>
           <Text style={styles.channelMeta}>@{(channelName).replace(/\s+/g, '').toLowerCase()} • {subscriberCount}</Text>
         </View>
       </View>
+
+      <View style={styles.actionButtonsContainer}>
+        <TouchableOpacity style={[styles.subscribeBtn, isSubscribed ? styles.subscribedState : styles.unsubscribedState]} onPress={handleSubscriptionToggle} activeOpacity={0.8}>
+          <Ionicons name={isSubscribed ? "notifications-outline" : "notifications"} size={18} color={isSubscribed ? "#FFF" : "#0F0F0F"} />
+          <Text style={[styles.subscribeText, isSubscribed ? {color: '#FFF'} : {color: '#0F0F0F'}]}>{isSubscribed ? 'Subscribed' : 'Subscribe'}</Text>
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.tabScrollContainer}>
         <FlatList 
           horizontal={true} 
@@ -391,9 +418,16 @@ const styles = StyleSheet.create({
   channelProfileSection: { flexDirection: 'row', padding: 15, alignItems: 'center' },
   avatarWrapper: { marginRight: 15 },
   channelLogoLarge: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#333' },
+  liveBadge: { position: 'absolute', bottom: -5, alignSelf: 'center', backgroundColor: '#FF0000', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 2, borderColor: '#0F0F0F' },
+  liveBadgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
   channelTextInfo: { flex: 1 },
   channelTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFF' },
   channelMeta: { fontSize: 12, color: '#AAA', marginTop: 2, marginBottom: 8 },
+  actionButtonsContainer: { flexDirection: 'row', paddingHorizontal: 15, paddingBottom: 15 },
+  subscribeBtn: { flex: 1, flexDirection: 'row', paddingVertical: 10, borderRadius: 20, justifyContent: 'center', alignItems: 'center', gap: 5 },
+  subscribedState: { backgroundColor: '#272727' },
+  unsubscribedState: { backgroundColor: '#F1F1F1' },
+  subscribeText: { fontSize: 14, fontWeight: 'bold' },
   tabScrollContainer: { borderBottomWidth: 1, borderBottomColor: '#222' },
   tabButton: { paddingVertical: 15, paddingHorizontal: 20 },
   activeTabButton: { borderBottomWidth: 2, borderBottomColor: '#FFF' },
