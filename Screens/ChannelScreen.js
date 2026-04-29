@@ -63,7 +63,6 @@ export default function ChannelScreen() {
           url = 'https:' + url;
         }
         
-        // ফিক্স: URL এর শেষে থাকা অতিরিক্ত প্যারামিটার (?sqp=...) কেটে ফেলা হচ্ছে
         if(url.includes('?')) {
             url = url.split('?')[0];
         }
@@ -141,35 +140,40 @@ export default function ChannelScreen() {
       const searchHtml = await searchResponse.text();
       let searchMatch = searchHtml.match(/ytInitialData\s*=\s*({.+?});/) || searchHtml.match(/var ytInitialData = (.*?);<\/script>/);
 
-      let targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`;
       let channelUrl = null;
 
       if (searchMatch && searchMatch[1]) {
         try {
           const searchData = JSON.parse(searchMatch[1]);
+          // আপডেট করা লজিক: প্রথম যে চ্যানেল লিংক পাবে, সেটিই নিয়ে নেবে
           const findChannelUrl = (node) => {
-            if (channelUrl) return;
-            if (node?.channelRenderer) {
-              const title = node.channelRenderer.title?.simpleText || "";
-              if (title.toLowerCase().includes(channelName.toLowerCase().split(' ')[0])) {
-                channelUrl = node.channelRenderer.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url;
-              }
+            if (channelUrl) return; // একবার পেয়ে গেলে আর খুঁজবে না
+            
+            if (node?.channelRenderer?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url) {
+               channelUrl = node.channelRenderer.navigationEndpoint.commandMetadata.webCommandMetadata.url;
+               return;
             }
             if (node && typeof node === 'object') {
               Object.values(node).forEach(child => findChannelUrl(child));
             }
           };
           findChannelUrl(searchData);
-        } catch (err) {}
+        } catch (err) {
+           console.log("Search Parsing Error", err);
+        }
       }
 
-      let targetVideosUrl = targetUrl;
-      let targetShortsUrl = targetUrl;
+      console.log("Found Channel URL:", channelUrl); // টার্মিনালে চেক করার জন্য
 
-      if (channelUrl) {
-        targetVideosUrl = `https://www.youtube.com${channelUrl}/videos`;
-        targetShortsUrl = `https://www.youtube.com${channelUrl}/shorts`;
+      // যদি কোনো চ্যানেল লিংক না পায়, তবে এখানে আটকে দেবে (ভুল লিংকে রিকোয়েস্ট পাঠাবে না)
+      if (!channelUrl) {
+        console.log("Error: Could not extract exact channel URL.");
+        setLoading(false);
+        return; 
       }
+
+      let targetVideosUrl = `https://www.youtube.com${channelUrl}/videos`;
+      let targetShortsUrl = `https://www.youtube.com${channelUrl}/shorts`;
 
       const [videosRes, shortsRes] = await Promise.all([
         fetch(targetVideosUrl, { headers: { 'User-Agent': DESKTOP_AGENT } }),
@@ -286,7 +290,6 @@ export default function ChannelScreen() {
           <TouchableOpacity activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
             <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
             
-            {/* ডিবাগিংয়ের জন্য স্ক্রিনে লিংক প্রিন্ট করা হচ্ছে */}
             <Text style={{ color: '#FFD700', fontSize: 11, marginTop: 4, fontWeight: 'bold' }}>
               Link: {item.thumbnail ? item.thumbnail : 'No Link Found'}
             </Text>
