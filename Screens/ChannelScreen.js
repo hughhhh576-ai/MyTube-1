@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, SafeAreaView, StatusBar, Dimensions, ActivityIndicator } from 'react-native';
+// এখান থেকে SafeAreaView সরিয়ে দেওয়া হয়েছে
+import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, StatusBar, Dimensions, ActivityIndicator } from 'react-native';
+// নতুন SafeAreaView ইম্পোর্ট করা হলো
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -155,9 +158,7 @@ export default function ChannelScreen() {
             }
           };
           findChannelUrl(searchData);
-        } catch (err) {
-          console.log("Search Data Parse Error:", err.message);
-        }
+        } catch (err) {}
       }
 
       let targetVideosUrl = targetUrl;
@@ -186,7 +187,6 @@ export default function ChannelScreen() {
 
       const categorizedData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
 
-      // JSON Parse Error থেকে বাঁচতে try-catch যুক্ত করা হলো
       const processMatch = (match, tabType) => {
         if (match && match[1]) {
           try {
@@ -194,7 +194,6 @@ export default function ChannelScreen() {
             extractChannelDataRecursively(parsedData, categorizedData, tabType);
             return parsedData;
           } catch (error) {
-            console.log(`JSON Parse Error in ${tabType}:`, error.message);
             return null;
           }
         }
@@ -244,7 +243,7 @@ export default function ChannelScreen() {
       }
 
     } catch (error) {
-      console.error("Fetch Data Overall Error:", error);
+      console.error(error);
     } finally { 
       setLoading(false); 
     }
@@ -252,7 +251,6 @@ export default function ChannelScreen() {
 
   const fetchMoreData = async () => {
     const currentToken = activeTab === 'Videos' ? videoToken : shortToken;
-    
     if (!currentToken || isLoadingMore || !apiKey) return;
 
     setIsLoadingMore(true);
@@ -264,30 +262,16 @@ export default function ChannelScreen() {
           'User-Agent': DESKTOP_AGENT,
         },
         body: JSON.stringify({
-          context: {
-            client: {
-              clientName: 'WEB',
-              clientVersion: '2.20231214.00.00',
-            }
-          },
+          context: { client: { clientName: 'WEB', clientVersion: '2.20231214.00.00' } },
           continuation: currentToken
         })
       });
       
       const responseText = await response.text();
       let data;
-
-      // Pagination API থেকে HTML আসলে যাতে ক্র্যাশ না করে
-      try {
-        data = JSON.parse(responseText);
-      } catch (err) {
-        console.log("Pagination JSON Parse Error. Response was likely HTML.");
-        setIsLoadingMore(false);
-        return;
-      }
+      try { data = JSON.parse(responseText); } catch (err) { setIsLoadingMore(false); return; }
       
       const newData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
-      
       extractChannelDataRecursively(data, newData, activeTab);
 
       const filteredNewItems = newData[activeTab].filter(
@@ -299,14 +283,10 @@ export default function ChannelScreen() {
         [activeTab]: [...prev[activeTab], ...filteredNewItems]
       }));
 
-      if (activeTab === 'Videos') {
-        setVideoToken(newData.VideosToken || null);
-      } else {
-        setShortToken(newData.ShortsToken || null);
-      }
+      if (activeTab === 'Videos') setVideoToken(newData.VideosToken || null);
+      else setShortToken(newData.ShortsToken || null);
 
     } catch (error) {
-      console.error('Error fetching more videos:', error);
     } finally {
       setIsLoadingMore(false);
     }
@@ -334,6 +314,9 @@ export default function ChannelScreen() {
   };
 
   const renderItem = ({ item }) => {
+    // এখানে আমরা চেক করছি যে ছবির লিংকে কী আসছে
+    console.log("Checking Thumbnail URL:", item.thumbnail);
+
     if (activeTab === 'Shorts') {
       return (
         <TouchableOpacity style={styles.shortGridItem} activeOpacity={0.8} onPress={() => navigation.navigate('ShortsScreen', { videoId: item.id, videoData: item })}>
@@ -487,12 +470,10 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 5 },
   bannerImage: { width: width, height: width * 0.25, resizeMode: 'cover', backgroundColor: '#222' },
   channelProfileSection: { flexDirection: 'row', padding: 15, alignItems: 'center' },
-
   avatarWrapper: { position: 'relative', marginRight: 15 },
   channelLogoLarge: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#333' },
   liveBadge: { position: 'absolute', bottom: -5, alignSelf: 'center', backgroundColor: '#FF0000', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 2, borderColor: '#0F0F0F' },
   liveBadgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-
   channelTextInfo: { flex: 1 },
   channelTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFF' },
   channelMeta: { fontSize: 12, color: '#AAA', marginTop: 2, marginBottom: 8 },
@@ -506,7 +487,6 @@ const styles = StyleSheet.create({
   activeTabButton: { borderBottomWidth: 2, borderBottomColor: '#FFF' },
   tabText: { color: '#AAA', fontSize: 15, fontWeight: '500' },
   activeTabText: { color: '#FFF', fontWeight: 'bold' },
-
   videoCard: { marginBottom: 20 },
   thumbnailContainer: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#111', position: 'relative' },
   thumbnailImage: { width: '100%', height: '100%', resizeMode: 'cover' },
@@ -514,13 +494,11 @@ const styles = StyleSheet.create({
   videoInfoContainer: { paddingHorizontal: 12, paddingTop: 10 },
   videoTitle: { color: '#FFF', fontSize: 15, fontWeight: '500', marginBottom: 4, lineHeight: 22 },
   videoMeta: { color: '#AAA', fontSize: 13 },
-
   shortGridItem: { width: (width / 2) - 10, margin: 5, position: 'relative', backgroundColor: '#111', borderRadius: 8, overflow: 'hidden' },
   shortGridImage: { width: '100%', height: 250, resizeMode: 'cover' },
   shortViewsOverlay: { position: 'absolute', bottom: 55, left: 5, flexDirection: 'row', alignItems: 'center' },
   shortViewsText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 3, textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 2 },
   shortTitle: { color: '#FFF', fontSize: 13, fontWeight: '500', lineHeight: 18 },
-
   emptyStateContainer: { padding: 40, alignItems: 'center', justifyContent: 'center' },
   emptyStateText: { color: '#AAA', fontSize: 16, fontWeight: '500' }
 });
