@@ -8,17 +8,14 @@ import * as NavigationBar from 'expo-navigation-bar';
 
 const { width } = Dimensions.get('window');
 
-// 🔴 এখানে আপনার সার্ভারের আইপি (IP) বা ডোমেইন দিন
+// 🔴 এখানে আপনার সার্ভারের আইপি (IP) দিন
 const MY_SERVER_URL = 'http://127.0.0.1:10000'; 
 
-// মাসের ভিত্তিতে ভিডিও গ্রুপ করার ফাংশন
 const getGroupName = (timeString) => {
   const t = (timeString || '').toLowerCase();
-  
   if (t.includes('দিন') || t.includes('আজ') || t.includes('ঘণ্টা')) return 'চলতি মাসের ভিডিও';
   if (t.includes('মাস')) return `${timeString.split(' ')[0]} মাস পূর্বের ভিডিও`;
   if (t.includes('বছর')) return `${timeString.split(' ')[0]} বছর পূর্বের ভিডিও`;
-  
   return 'অন্যান্য ভিডিও';
 };
 
@@ -30,14 +27,12 @@ export default function ChannelScreen() {
   const { channelData = {}, channelName: paramName, channelAvatar: paramAvatar } = route.params || {};
   const channelName = channelData?.channel || paramName || 'YouTube Channel';
   const channelAvatar = channelData?.avatar || paramAvatar || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
-  
-  // চ্যানেলের Handle তৈরি করা (যেমন: @nasheedstudio)
-  const channelHandle = `@${channelName.replace(/\s+/g, '').toLowerCase()}`;
 
   const [activeTab, setActiveTab] = useState('Videos');
   const [loading, setLoading] = useState(true);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [videos, setVideos] = useState([]);
+  const [channelInfo, setChannelInfo] = useState({ banner: null, subs: 'N/A' });
   const [expandedGroups, setExpandedGroups] = useState({});
 
   useEffect(() => { if (isFocused && Platform.OS === 'android') NavigationBar.setVisibilityAsync("hidden"); }, [isFocused]);
@@ -50,15 +45,21 @@ export default function ChannelScreen() {
     } catch (e) {}
   };
 
-  // ✅ সরাসরি আপনার সার্ভার থেকে ফাস্ট ডেটা ফেচ করা
+  // ✅ সার্ভারে চ্যানেলের নাম (Name) পাঠানো হচ্ছে
   const fetchFromServer = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${MY_SERVER_URL}/api/channel-data?handle=${encodeURIComponent(channelHandle)}`);
+      const response = await fetch(`${MY_SERVER_URL}/api/channel-data?name=${encodeURIComponent(channelName)}`);
       const data = await response.json();
 
-      if (data.success && data.videos) {
-        setVideos(data.videos);
+      if (data.success) {
+        if (data.videos) setVideos(data.videos);
+        if (data.banner || data.subscriberCount) {
+           setChannelInfo({ 
+              banner: data.banner || null, 
+              subs: data.subscriberCount || 'N/A' 
+           });
+        }
       }
     } catch (error) {
       console.error("Server Fetch Error: ", error);
@@ -75,9 +76,8 @@ export default function ChannelScreen() {
     await AsyncStorage.setItem('subscribedChannels', JSON.stringify(subs));
   };
 
-  // --- Dynamic Month by Month Logic ---
   const displayData = useMemo(() => {
-    if (activeTab === 'Shorts') return []; // শর্টসের জন্য আলাদা API লাগবে
+    if (activeTab === 'Shorts') return [];
 
     const groupsMap = new Map();
     videos.forEach(v => {
@@ -88,13 +88,10 @@ export default function ChannelScreen() {
 
     let flatListReadyData = [];
     for (let [groupName, vids] of groupsMap) {
-      // ফোল্ডারের হেডার যুক্ত করা হচ্ছে
       flatListReadyData.push({ isHeader: true, id: `header-${groupName}`, title: groupName, count: vids.length });
 
-      // ফোল্ডার ওপেন থাকলে সব দেখাবে, না থাকলে মাত্র ৩টি দেখাবে
       const isExpanded = expandedGroups[groupName];
       const vidsToShow = isExpanded ? vids : vids.slice(0, 3);
-
       vidsToShow.forEach(v => flatListReadyData.push({ ...v, isListVideo: true }));
     }
 
@@ -102,7 +99,6 @@ export default function ChannelScreen() {
   }, [videos, activeTab, expandedGroups]);
 
   const renderItem = ({ item }) => {
-    // ফোল্ডারের হেডার ডিজাইন
     if (item.isHeader) return (
       <TouchableOpacity style={styles.headerRow} activeOpacity={0.7} onPress={() => setExpandedGroups(p => ({ ...p, [item.title]: !p[item.title] }))}>
         <Text style={styles.headerTxt}>{item.title}</Text>
@@ -110,7 +106,6 @@ export default function ChannelScreen() {
       </TouchableOpacity>
     );
     
-    // ভিডিও লিস্ট ডিজাইন
     return (
       <View style={styles.vidList}>
         <TouchableOpacity style={styles.vidThumbWrap} activeOpacity={0.8} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
@@ -138,19 +133,28 @@ export default function ChannelScreen() {
         key="videos" 
         data={displayData} 
         renderItem={renderItem} 
-        keyExtractor={(it, i) => it.id || String(i)} 
+        keyExtractor={(it, i) => it.id ? it.id + i : String(i)} 
         showsVerticalScrollIndicator={false}
+        initialNumToRender={8}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        removeClippedSubviews={true}
         ListHeaderComponent={() => (
           <View>
             <View style={styles.bannerWrap}>
-               {/* এখানে ডিফল্ট ব্যানার দেওয়া হয়েছে। সার্ভার থেকে আনলে ডাইনামিক করা যাবে */}
-               <View style={styles.bannerPlc}><Ionicons name="logo-youtube" size={40} color="#F00" /><Text style={{ color: '#FFF' }}>MyTube</Text></View>
+               {channelInfo.banner ? 
+                  <Image source={{ uri: channelInfo.banner }} style={styles.banner} /> : 
+                  <View style={styles.bannerPlc}><Ionicons name="logo-youtube" size={40} color="#F00" /><Text style={{ color: '#FFF' }}>MyTube</Text></View>
+               }
             </View>
             <View style={styles.profileBox}>
               <TouchableOpacity activeOpacity={0.8}>
                 <Image source={{ uri: channelAvatar }} style={styles.avatar} />
               </TouchableOpacity>
-              <View style={styles.chInfo}><Text style={styles.chTitle}>{channelName}</Text><Text style={styles.chMeta}>{channelHandle}</Text></View>
+              <View style={styles.chInfo}>
+                 <Text style={styles.chTitle}>{channelName}</Text>
+                 <Text style={styles.chMeta}>{channelInfo.subs}</Text>
+              </View>
             </View>
             <TouchableOpacity style={[styles.subBtn, isSubscribed ? { backgroundColor: '#272727' } : { backgroundColor: '#FFF' }]} activeOpacity={0.8} onPress={toggleSub}>
               <Ionicons name={isSubscribed ? "notifications-outline" : "notifications"} size={18} color={isSubscribed ? "#FFF" : "#000"} />
@@ -170,7 +174,7 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', padding: 10, backgroundColor: '#0F0F0F', borderBottomWidth: 1, borderBottomColor: '#222', gap: 10 },
   logoWrap: { flexDirection: 'row', alignItems: 'center' }, logoTxt: { color: '#FFF', fontSize: 15, fontWeight: 'bold', marginLeft: 4 },
   searchBox: { flex: 1, flexDirection: 'row', backgroundColor: '#222', borderRadius: 20, padding: 10, justifyContent: 'space-between', alignItems: 'center' }, searchTxt: { color: '#888', fontSize: 13 },
-  bannerWrap: { width, height: width * 0.25, backgroundColor: '#222' }, bannerPlc: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  bannerWrap: { width, height: width * 0.25, backgroundColor: '#222' }, banner: { width: '100%', height: '100%', resizeMode: 'cover' }, bannerPlc: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   profileBox: { flexDirection: 'row', padding: 15, alignItems: 'center', gap: 15 }, avatar: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#333' },
   chInfo: { flex: 1 }, chTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFF' }, chMeta: { fontSize: 12, color: '#AAA', marginTop: 2 },
   subBtn: { flexDirection: 'row', padding: 10, marginHorizontal: 15, borderRadius: 20, justifyContent: 'center', alignItems: 'center', gap: 5, marginBottom: 15 },
