@@ -377,9 +377,13 @@ export default function ChannelScreen() {
 
   const ChannelHeader = () => (
     <View>
-      <Image source={{ uri: channelBanner }} style={styles.bannerImage} />
-      <View style={styles.channelProfileSection}>
-        <TouchableOpacity 
+      <Image source={{ uri: channelAvatar }} style={styles.channelLogoLarge} />
+           {isLiveChannel && (
+             <View style={styles.liveBadge}>
+               <Text style={styles.liveBadgeText}>LIVE</Text>
+             </View>
+           )}
+        </TouchableOpacity> 
           style={styles.avatarWrapper} 
           activeOpacity={isLiveChannel ? 0.7 : 1} 
           onPress={() => {
