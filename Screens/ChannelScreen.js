@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-// লক্ষ্য করুন: SafeAreaView এখান থেকে বাদ দিয়ে নিচে আলাদাভাবে ইম্পোর্ট করা হয়েছে
 import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, StatusBar, Dimensions, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,7 +29,6 @@ export default function ChannelScreen() {
   const [subscriberCount, setSubscriberCount] = useState('N/A');
 
   const [tabData, setTabData] = useState({ Videos: [], Shorts: [] });
-  
   const [videoToken, setVideoToken] = useState(null);
   const [shortToken, setShortToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
@@ -60,8 +58,14 @@ export default function ChannelScreen() {
         const thumbs = thumbnailsObject.thumbnails;
         const selectedThumb = thumbQuality === 'Data Saver' ? thumbs[0] : thumbs[thumbs.length - 1];
         let url = selectedThumb.url;
+        
         if (url.startsWith('//')) {
           url = 'https:' + url;
+        }
+        
+        // ফিক্স: URL এর শেষে থাকা অতিরিক্ত প্যারামিটার (?sqp=...) কেটে ফেলা হচ্ছে
+        if(url.includes('?')) {
+            url = url.split('?')[0];
         }
         return url;
       }
@@ -78,7 +82,7 @@ export default function ChannelScreen() {
 
       let thumbnailUrl = getThumbnail(vid.thumbnail);
       if (!thumbnailUrl) {
-         thumbnailUrl = thumbQuality === 'Data Saver' ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+         thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
       }
 
       return {
@@ -112,7 +116,7 @@ export default function ChannelScreen() {
 
         let shortThumbnailUrl = getThumbnail(node.reelItemRenderer.thumbnail);
         if (!shortThumbnailUrl) {
-            shortThumbnailUrl = thumbQuality === 'Data Saver' ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` : `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+            shortThumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
         }
 
         categorizedData.Shorts.push({
@@ -191,9 +195,7 @@ export default function ChannelScreen() {
             const parsedData = JSON.parse(match[1]);
             extractChannelDataRecursively(parsedData, categorizedData, tabType);
             return parsedData;
-          } catch (error) {
-            return null;
-          }
+          } catch (error) { return null; }
         }
         return null;
       };
@@ -207,44 +209,20 @@ export default function ChannelScreen() {
       setVideoToken(categorizedData.VideosToken);
       setShortToken(categorizedData.ShortsToken);
 
-      const currentLiveVideo = categorizedData.Videos.find(v => v.isLive);
-      if (currentLiveVideo) {
-         setIsLiveChannel(true);
-         setLiveVideoData(currentLiveVideo);
-      } else {
-         setIsLiveChannel(false);
-         setLiveVideoData(null);
-      }
-
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
 
       if (parsedVideosData) {
         const header = parsedVideosData?.header?.c4TabbedHeaderRenderer || parsedVideosData?.header?.pageHeaderRenderer;
-
         let bannerSrc = null;
-        if (header?.banner?.thumbnails) {
-            bannerSrc = header.banner.thumbnails;
-        } else if (header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources) {
-            bannerSrc = header.pageHeaderBanner.pageHeaderBannerImageViewModel.image.sources;
-        } else if (header?.content?.pageHeaderViewModel?.banner?.imageBannerViewModel?.image?.sources) {
-            bannerSrc = header.content.pageHeaderViewModel.banner.imageBannerViewModel.image.sources;
-        }
-
-        if (bannerSrc && bannerSrc.length > 0) {
-          setChannelBanner(bannerSrc[bannerSrc.length - 1].url);
-        }
-
-        const subs = header?.subscriberCountText?.simpleText || 
-                     header?.content?.pageHeaderViewModel?.metadata?.metadataRows?.[0]?.metadataParts?.[0]?.text?.content ||
-                     header?.content?.pageHeaderViewModel?.metadata?.metadataRows?.[1]?.metadataParts?.[0]?.text?.content;
+        if (header?.banner?.thumbnails) bannerSrc = header.banner.thumbnails;
+        else if (header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources) bannerSrc = header.pageHeaderBanner.pageHeaderBannerImageViewModel.image.sources;
+        if (bannerSrc && bannerSrc.length > 0) setChannelBanner(bannerSrc[bannerSrc.length - 1].url);
+        
+        const subs = header?.subscriberCountText?.simpleText || header?.content?.pageHeaderViewModel?.metadata?.metadataRows?.[0]?.metadataParts?.[0]?.text?.content;
         if (subs) setSubscriberCount(subs);
       }
 
-    } catch (error) {
-      console.error(error);
-    } finally { 
-      setLoading(false); 
-    }
+    } catch (error) {} finally { setLoading(false); }
   };
 
   const fetchMoreData = async () => {
@@ -255,16 +233,12 @@ export default function ChannelScreen() {
     try {
       const response = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${apiKey}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': DESKTOP_AGENT,
-        },
+        headers: { 'Content-Type': 'application/json', 'User-Agent': DESKTOP_AGENT },
         body: JSON.stringify({
           context: { client: { clientName: 'WEB', clientVersion: '2.20231214.00.00' } },
           continuation: currentToken
         })
       });
-      
       const responseText = await response.text();
       let data;
       try { data = JSON.parse(responseText); } catch (err) { setIsLoadingMore(false); return; }
@@ -272,38 +246,13 @@ export default function ChannelScreen() {
       const newData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
       extractChannelDataRecursively(data, newData, activeTab);
 
-      const filteredNewItems = newData[activeTab].filter(
-        newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id)
-      );
-
-      setTabData(prev => ({
-        ...prev,
-        [activeTab]: [...prev[activeTab], ...filteredNewItems]
-      }));
+      const filteredNewItems = newData[activeTab].filter(newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id));
+      setTabData(prev => ({ ...prev, [activeTab]: [...prev[activeTab], ...filteredNewItems] }));
 
       if (activeTab === 'Videos') setVideoToken(newData.VideosToken || null);
       else setShortToken(newData.ShortsToken || null);
 
-    } catch (error) {
-    } finally {
-      setIsLoadingMore(false);
-    }
-  };
-
-  const handleSubscriptionToggle = async () => {
-    try {
-      const subs = await AsyncStorage.getItem('subscribedChannels');
-      let parsedSubs = subs ? JSON.parse(subs) : [];
-
-      if (isSubscribed) {
-        parsedSubs = parsedSubs.filter(sub => sub.name !== channelName);
-        setIsSubscribed(false);
-      } else {
-        parsedSubs.push({ id: Date.now().toString(), name: channelName, avatar: channelAvatar });
-        setIsSubscribed(true);
-      }
-      await AsyncStorage.setItem('subscribedChannels', JSON.stringify(parsedSubs));
-    } catch(e) {}
+    } catch (error) {} finally { setIsLoadingMore(false); }
   };
 
   const handleVideoPress = (item) => {
@@ -312,16 +261,10 @@ export default function ChannelScreen() {
   };
 
   const renderItem = ({ item }) => {
-    console.log("Checking Thumbnail URL:", item.thumbnail); // টার্মিনাল লগিং
-
     if (activeTab === 'Shorts') {
       return (
         <TouchableOpacity style={styles.shortGridItem} activeOpacity={0.8} onPress={() => navigation.navigate('ShortsScreen', { videoId: item.id, videoData: item })}>
-          <Image 
-            source={{ uri: item.thumbnail }} 
-            style={styles.shortGridImage} 
-            onError={(e) => console.log("Shorts Image Load Error:", item.thumbnail, e.nativeEvent.error)}
-          />
+          <Image source={{ uri: item.thumbnail }} style={styles.shortGridImage} />
           <View style={styles.shortViewsOverlay}>
             <Ionicons name="play-outline" size={14} color="#FFF" />
             <Text style={styles.shortViewsText}>{item.views}</Text>
@@ -336,16 +279,18 @@ export default function ChannelScreen() {
     return (
       <View style={styles.videoCard}>
         <TouchableOpacity style={styles.thumbnailContainer} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
-          <Image 
-            source={{ uri: item.thumbnail }} 
-            style={styles.thumbnailImage} 
-            onError={(e) => console.log("Video Image Load Error:", item.thumbnail, e.nativeEvent.error)}
-          />
+          <Image source={{ uri: item.thumbnail }} style={styles.thumbnailImage} />
           {item.duration ? <Text style={styles.durationBadge}>{item.duration}</Text> : null}
         </TouchableOpacity>
         <View style={styles.videoInfoContainer}>
           <TouchableOpacity activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
             <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
+            
+            {/* ডিবাগিংয়ের জন্য স্ক্রিনে লিংক প্রিন্ট করা হচ্ছে */}
+            <Text style={{ color: '#FFD700', fontSize: 11, marginTop: 4, fontWeight: 'bold' }}>
+              Link: {item.thumbnail ? item.thumbnail : 'No Link Found'}
+            </Text>
+
             <Text style={styles.videoMeta}>
               {item.views ? `${item.views}` : ''}
               {item.views && item.publishedTime ? ' • ' : ''}
@@ -361,59 +306,29 @@ export default function ChannelScreen() {
     if (loading) return null;
     return (
       <View style={styles.emptyStateContainer}>
-        <Text style={styles.emptyStateText}>
-          {activeTab === 'Shorts' ? 'No short video' : 'No videos found'}
-        </Text>
+        <Text style={styles.emptyStateText}>{activeTab === 'Shorts' ? 'No short video' : 'No videos found'}</Text>
       </View>
     );
   };
   
   const renderFooter = () => {
     if (!isLoadingMore) return null;
-    return (
-      <View style={{ paddingVertical: 20 }}>
-        <ActivityIndicator size="large" color="#FF0000" />
-      </View>
-    );
+    return <View style={{ paddingVertical: 20 }}><ActivityIndicator size="large" color="#FF0000" /></View>;
   };
 
   const ChannelHeader = () => (
     <View>
       <Image source={{ uri: channelBanner }} style={styles.bannerImage} />
       <View style={styles.channelProfileSection}>
-        <TouchableOpacity 
-          style={styles.avatarWrapper} 
-          activeOpacity={isLiveChannel ? 0.7 : 1} 
-          onPress={() => {
-            if (isLiveChannel && liveVideoData) {
-              DeviceEventEmitter.emit('playVideo', { videoId: liveVideoData.id, videoData: liveVideoData });
-              navigation.navigate('Player', { videoId: liveVideoData.id, videoData: liveVideoData });
-            }
-          }}
-        >
+        <View style={styles.avatarWrapper}>
            <Image source={{ uri: channelAvatar }} style={styles.channelLogoLarge} />
-           {isLiveChannel && (
-             <View style={styles.liveBadge}>
-               <Text style={styles.liveBadgeText}>LIVE</Text>
-             </View>
-           )}
-        </TouchableOpacity>
-
+        </View>
         <View style={styles.channelTextInfo}>
           <Text style={styles.channelTitle}>{channelName}</Text>
           <Text style={styles.channelMeta}>@{(channelName).replace(/\s+/g, '').toLowerCase()} • {subscriberCount}</Text>
         </View>
       </View>
-
-      <View style={styles.actionButtonsContainer}>
-        <TouchableOpacity style={[styles.subscribeBtn, isSubscribed ? styles.subscribedState : styles.unsubscribedState]} onPress={handleSubscriptionToggle} activeOpacity={0.8}>
-          <Ionicons name={isSubscribed ? "notifications-outline" : "notifications"} size={18} color={isSubscribed ? "#FFF" : "#0F0F0F"} />
-          <Text style={[styles.subscribeText, isSubscribed ? {color: '#FFF'} : {color: '#0F0F0F'}]}>{isSubscribed ? 'Subscribed' : 'Subscribe'}</Text>
-        </TouchableOpacity>
-      </View>
-
       <View style={styles.tabScrollContainer}>
-        {/* এখানেই মূল সংশোধনটি করা হয়েছে (horizontal={true}) */}
         <FlatList 
           horizontal={true} 
           showsHorizontalScrollIndicator={false} 
@@ -438,11 +353,7 @@ export default function ChannelScreen() {
            <Ionicons name="arrow-back" size={24} color="#FFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{channelName}</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Home')} style={styles.headerIcon}>
-           <Ionicons name="home" size={22} color="#FFF" />
-        </TouchableOpacity>
       </View>
-
       <FlatList 
         key={activeTab === 'Shorts' ? 'grid-2' : 'list-1'} 
         numColumns={activeTab === 'Shorts' ? 2 : 1} 
@@ -468,18 +379,11 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 5 },
   bannerImage: { width: width, height: width * 0.25, resizeMode: 'cover', backgroundColor: '#222' },
   channelProfileSection: { flexDirection: 'row', padding: 15, alignItems: 'center' },
-  avatarWrapper: { position: 'relative', marginRight: 15 },
+  avatarWrapper: { marginRight: 15 },
   channelLogoLarge: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#333' },
-  liveBadge: { position: 'absolute', bottom: -5, alignSelf: 'center', backgroundColor: '#FF0000', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 2, borderColor: '#0F0F0F' },
-  liveBadgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
   channelTextInfo: { flex: 1 },
   channelTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFF' },
   channelMeta: { fontSize: 12, color: '#AAA', marginTop: 2, marginBottom: 8 },
-  actionButtonsContainer: { flexDirection: 'row', paddingHorizontal: 15, paddingBottom: 15 },
-  subscribeBtn: { flex: 1, flexDirection: 'row', paddingVertical: 10, borderRadius: 20, justifyContent: 'center', alignItems: 'center', gap: 5 },
-  subscribedState: { backgroundColor: '#272727' },
-  unsubscribedState: { backgroundColor: '#F1F1F1' },
-  subscribeText: { fontSize: 14, fontWeight: 'bold' },
   tabScrollContainer: { borderBottomWidth: 1, borderBottomColor: '#222' },
   tabButton: { paddingVertical: 15, paddingHorizontal: 20 },
   activeTabButton: { borderBottomWidth: 2, borderBottomColor: '#FFF' },
