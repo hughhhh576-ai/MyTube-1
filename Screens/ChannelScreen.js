@@ -25,8 +25,8 @@ export default function ChannelScreen() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLiveChannel, setIsLiveChannel] = useState(false); 
   const [liveVideoData, setLiveVideoData] = useState(null);
-  const [subscriberCount, setSubscriberCount] = useState('N/A');
   const [channelBanner, setChannelBanner] = useState('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop');
+  const [subscriberCount, setSubscriberCount] = useState('N/A');
 
   const [tabData, setTabData] = useState({ Videos: [], Shorts: [] });
   const [videoToken, setVideoToken] = useState(null);
@@ -50,7 +50,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 সুপার স্ক্যানার: এটি ভিডিও বক্স থেকে টাইটেল, সময়, এবং ডিউরেশন বের করবে
+  // 🧠 স্মার্ট স্ক্যানার: এটি শুধু টাইটেল, লিংক, বয়স এবং সময় বের করবে (কোনো থাম্বনেইল রেন্ডার করবে না)
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [rootNode];
     const seenIds = new Set();
@@ -58,65 +58,77 @@ export default function ChannelScreen() {
     while (stack.length > 0) {
       let node = stack.pop();
 
-      if (!node) continue;
-
       // ইউটিউবের নতুন লেআউট বাইপাস
-      if (node.richItemRenderer && node.richItemRenderer.content) {
+      if (node?.richItemRenderer?.content) {
         node = node.richItemRenderer.content;
       }
 
       if (Array.isArray(node)) {
-        for (let i = 0; i < node.length; i++) stack.push(node[i]);
-      } else if (typeof node === 'object') {
+        for (let i = 0; i < node.length; i++) {
+          if (node[i] && typeof node[i] === 'object') stack.push(node[i]);
+        }
+      } else if (node && typeof node === 'object') {
         
         // Load More Token সেভ করা
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        // 🎯 ভিডিও কার্ড টার্গেট করা
+        // টার্গেট ভিডিও কার্ড (যেখানে আইডি, টাইটেল, বয়স, সময় সব একসাথে থাকে)
         const target = node.videoRenderer || node.gridVideoRenderer || node.compactVideoRenderer;
-        
-        if (target && target.videoId && !seenIds.has(target.videoId)) {
-          seenIds.add(target.videoId);
-          
+
+        if (target && target.videoId) {
           const vId = target.videoId;
-          // টাইটেল এক্সট্রাক্ট
-          const title = target.title?.runs?.[0]?.text || target.title?.simpleText || 'No Title Found';
-          // ভিডিওর সাইজ/ডিউরেশন এক্সট্রাক্ট
-          const duration = target.lengthText?.simpleText || 'N/A';
-          // ভিডিওর বয়স/সময় এক্সট্রাক্ট
-          const publishedTime = target.publishedTimeText?.simpleText || 'N/A';
-
-          categorizedData.Videos.push({
-            id: String(vId),
-            title: String(title),
-            duration: String(duration),
-            publishedTime: String(publishedTime),
-            value: `https://www.youtube.com/watch?v=${vId}`,
-            channel: channelName,
-          });
-        } 
-        // 🎯 শর্টস কার্ড টার্গেট করা
-        else if (node.reelItemRenderer && node.reelItemRenderer.videoId && !seenIds.has(node.reelItemRenderer.videoId)) {
-          seenIds.add(node.reelItemRenderer.videoId);
-          const vId = node.reelItemRenderer.videoId;
-          const title = node.reelItemRenderer.headline?.simpleText || node.reelItemRenderer.title?.simpleText || 'Short Video';
           
-          categorizedData.Shorts.push({
-            id: String(vId),
-            title: String(title),
-            duration: 'Shorts',
-            publishedTime: 'N/A', // সাধারণত শর্টস-এ রুট লেভেলে টাইম থাকে না
-            value: `https://www.youtube.com/shorts/${vId}`,
-            channel: channelName,
-          });
-        }
+          if (!seenIds.has(vId)) {
+            seenIds.add(vId);
 
-        // গভীরে যাওয়ার লজিক
-        const values = Object.values(node);
-        for (let i = 0; i < values.length; i++) {
-          if (values[i] && typeof values[i] === 'object') stack.push(values[i]);
+            // ১. টাইটেল এক্সট্রাক্ট করা
+            const title = target.title?.runs?.[0]?.text || target.title?.simpleText || 'No Title Found';
+            
+            // ২. ভিডিওর বয়স (Published Time) এক্সট্রাক্ট করা
+            const publishedTime = target.publishedTimeText?.simpleText || 'Unknown Age';
+            
+            // ৩. ভিডিওর সময় (Duration) এক্সট্রাক্ট করা
+            const duration = target.lengthText?.simpleText || 'Unknown Length';
+
+            categorizedData.Videos.push({
+              id: String(vId),
+              title: String(title),
+              value: `https://www.youtube.com/watch?v=${vId}`, // সরাসরি লিংক
+              publishedTime: String(publishedTime),
+              duration: String(duration),
+              channel: channelName,
+            });
+          }
+        } 
+        // শর্টস ভিডিওর জন্য আলাদা হ্যান্ডেলিং
+        else if (node.reelItemRenderer && node.reelItemRenderer.videoId) {
+          const shortTarget = node.reelItemRenderer;
+          const vId = shortTarget.videoId;
+          
+          if (!seenIds.has(vId)) {
+            seenIds.add(vId);
+            
+            const title = shortTarget.headline?.simpleText || shortTarget.title?.simpleText || 'Short Video';
+            const views = shortTarget.viewCountText?.simpleText || '';
+
+            categorizedData.Shorts.push({
+              id: String(vId),
+              title: String(title),
+              value: `https://www.youtube.com/watch?v=${vId}`,
+              duration: 'Short (1 min or less)',
+              publishedTime: views, // শর্টসের ক্ষেত্রে সাধারণত বয়স না দিয়ে ভিউজ থাকে
+              channel: channelName,
+            });
+          }
+        } 
+        else {
+          // গভীরে যাওয়ার লজিক
+          const values = Object.values(node);
+          for (let i = 0; i < values.length; i++) {
+            if (values[i] && typeof values[i] === 'object') stack.push(values[i]);
+          }
         }
       }
     }
@@ -202,8 +214,12 @@ export default function ChannelScreen() {
          } catch (err) {}
       }
 
+      categorizedData.Videos = categorizedData.Videos.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
+      categorizedData.Shorts = categorizedData.Shorts.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
+
       setVideoToken(categorizedData.VideosToken);
       setShortToken(categorizedData.ShortsToken);
+
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
 
       // Header Data
@@ -267,21 +283,20 @@ export default function ChannelScreen() {
     } catch(e) {}
   };
 
-  // 🎬 ভিডিও প্লে করার ফাংশন
   const handleVideoPress = (item) => {
     DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: item });
     navigation.navigate('Player', { videoId: item.id, videoData: item });
   };
 
-  // 🎯 পরিবর্তিত renderItem (টাইটেল, লিংক, ডিউরেশন এবং বয়স দেখাবে)
+  // 🎯 পরিবর্তিত renderItem (শুধু টাইটেল, বয়স, সময় এবং লিংক দেখাবে)
   const renderItem = ({ item }) => {
     return (
-      <TouchableOpacity style={styles.debugCard} activeOpacity={0.7} onPress={() => handleVideoPress(item)}>
+      <TouchableOpacity style={styles.debugCard} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
         <Text style={styles.debugTitle} numberOfLines={2}>{item.title}</Text>
         
-        <View style={styles.metaDataContainer}>
-          <Text style={styles.metaText}><Ionicons name="time-outline" size={14} color="#0F0" /> {item.duration}</Text>
-          <Text style={styles.metaText}><Ionicons name="calendar-outline" size={14} color="#0F0" /> {item.publishedTime}</Text>
+        <View style={styles.metaContainer}>
+          <Text style={styles.debugMeta}>📅 বয়স: {item.publishedTime}</Text>
+          <Text style={styles.debugMeta}>⏱️ সময়: {item.duration}</Text>
         </View>
 
         <Text style={styles.debugType}>লিংক: <Text style={styles.debugValue}>{item.value}</Text></Text>
@@ -300,7 +315,7 @@ export default function ChannelScreen() {
 
   const renderFooter = () => {
     if (!isLoadingMore) return null;
-    return <View style={{ paddingVertical: 20 }}><ActivityIndicator size="large" color="#0F0" /></View>;
+    return <View style={{ paddingVertical: 20 }}><ActivityIndicator size="large" color="#FF0000" /></View>;
   };
 
   const ChannelHeader = () => (
@@ -310,6 +325,9 @@ export default function ChannelScreen() {
         <TouchableOpacity 
           style={styles.avatarWrapper} 
           activeOpacity={isLiveChannel ? 0.7 : 1} 
+          onPress={() => {
+             // লাইভ হ্যান্ডেলিং 
+          }}
         >
            <Image source={{ uri: channelAvatar }} style={styles.channelLogoLarge} />
         </TouchableOpacity>
@@ -340,7 +358,7 @@ export default function ChannelScreen() {
           )}
         />
       </View>
-      {loading && <View style={{ padding: 50, alignItems: 'center' }}><ActivityIndicator size="large" color="#0F0" /></View>}
+      {loading && <View style={{ padding: 50, alignItems: 'center' }}><ActivityIndicator size="large" color="#FF0000" /></View>}
     </View>
   );
 
@@ -389,18 +407,15 @@ const styles = StyleSheet.create({
   subscribeText: { fontSize: 14, fontWeight: 'bold' },
   tabScrollContainer: { borderBottomWidth: 1, borderBottomColor: '#222' },
   tabButton: { paddingVertical: 15, paddingHorizontal: 20 },
-  activeTabButton: { borderBottomWidth: 2, borderBottomColor: '#0F0' }, // সবুজ রঙের ইন্ডিকেটর
+  activeTabButton: { borderBottomWidth: 2, borderBottomColor: '#FFF' },
   tabText: { color: '#AAA', fontSize: 15, fontWeight: '500' },
-  activeTabText: { color: '#0F0', fontWeight: 'bold' },
-  
-  // 🎯 নতুন ডিজাইনের জন্য স্টাইল (টাইটেল, লিংক, সময় এবং বয়স)
+  activeTabText: { color: '#FFF', fontWeight: 'bold' },
   debugCard: { backgroundColor: '#111', padding: 15, marginBottom: 12, borderRadius: 8, borderWidth: 1, borderColor: '#333', marginHorizontal: 10 },
   debugTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 8, lineHeight: 22 },
-  metaDataContainer: { flexDirection: 'row', gap: 15, marginBottom: 10 },
-  metaText: { color: '#0F0', fontSize: 13, fontWeight: 'bold' },
+  metaContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10, backgroundColor: '#222', padding: 8, borderRadius: 5 },
+  debugMeta: { color: '#FFD700', fontSize: 13, fontWeight: 'bold' }, // বয়স ও সময় হলুদ রঙে হাইলাইট করা
   debugType: { color: '#AAA', fontSize: 13 },
-  debugValue: { color: '#FFF' }, 
-  
+  debugValue: { color: '#0F0' }, 
   emptyStateContainer: { padding: 40, alignItems: 'center', justifyContent: 'center' },
   emptyStateText: { color: '#AAA', fontSize: 16, fontWeight: '500' }
 });
