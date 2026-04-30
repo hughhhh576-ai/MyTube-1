@@ -5,7 +5,7 @@ import { useNavigation, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
-const HEADER_HEIGHT = height / 12; 
+const HEADER_HEIGHT = height / 12; // ডিভাইসের ১২ ভাগের ১ ভাগ উচ্চতা
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export default function SearchSettingScreen() {
@@ -20,7 +20,10 @@ export default function SearchSettingScreen() {
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
+  
+  // ইনফিনিট স্ক্রলের জন্য
   const [continuationToken, setContinuationToken] = useState(null);
+  const [apiKey, setApiKey] = useState(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -52,6 +55,28 @@ export default function SearchSettingScreen() {
     await AsyncStorage.setItem('myTubeSearchHistory', JSON.stringify(updatedHistory));
   };
 
+  const handleSearchSubmit = async (searchTerm) => {
+    const text = typeof searchTerm === 'string' ? searchTerm : query;
+    if (text.trim().length === 0) return;
+
+    // ১. চেক করা হচ্ছে এটি কোনো ভিডিওর লিংক কি না
+    const ytLinkMatch = text.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/|.*embed\/))([^&?\s]{11})/);
+    if (ytLinkMatch && ytLinkMatch[1]) {
+      Keyboard.dismiss();
+      const videoId = ytLinkMatch[1];
+      // লিংক হলে সরাসরি প্লেয়ার স্ক্রিনে পাঠিয়ে দেওয়া হবে
+      navigation.navigate('Player', { videoId: videoId, videoData: { id: videoId, title: 'Playing from Link...' } });
+      return;
+    }
+
+    // লিংক না হলে সাধারণ সার্চ হবে
+    saveHistory(text.trim());
+    Keyboard.dismiss();
+    setQuery(text.trim());
+    setSuggestions([]);
+    fetchSearchResults(text.trim());
+  };
+
   const fetchSearchResults = async (searchQuery) => {
     setIsSearching(true);
     setHasSearched(true);
@@ -59,6 +84,11 @@ export default function SearchSettingScreen() {
     try {
       const response = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
       const htmlText = await response.text();
+      
+      // API Key বের করা (অধিক ফলাফল আনার জন্য)
+      const apiMatch = htmlText.match(/"INNERTUBE_API_KEY":"(.*?)"/);
+      if (apiMatch && apiMatch[1]) setApiKey(apiMatch[1]);
+
       let match = htmlText.match(/ytInitialData\s*=\s*({.+?});/) || htmlText.match(/var ytInitialData = (.*?);<\/script>/);
 
       if (match && match[1]) {
@@ -68,6 +98,27 @@ export default function SearchSettingScreen() {
         setContinuationToken(nextToken);
       }
     } catch (e) {} finally { setIsSearching(false); }
+  };
+
+  // ২. InnerTube API এর মাধ্যমে অধিক ফলাফল আনা
+  const handleLoadMore = async () => {
+    if (isLoadingMore || !continuationToken || !apiKey) return;
+    setIsLoadingMore(true);
+    try {
+      const response = await fetch(`https://www.youtube.com/youtubei/v1/search?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'User-Agent': DESKTOP_AGENT },
+        body: JSON.stringify({
+          context: { client: { clientName: 'WEB', clientVersion: '2.20231214.00.00' } },
+          continuation: continuationToken
+        })
+      });
+      const data = await response.json();
+      const { finalFeed, nextToken } = processYouTubeData(data);
+      
+      setSearchResults(prev => [...prev, ...finalFeed]);
+      setContinuationToken(nextToken);
+    } catch (e) {} finally { setIsLoadingMore(false); }
   };
 
   const processYouTubeData = (jsonData) => {
@@ -92,15 +143,18 @@ export default function SearchSettingScreen() {
 
     const finalFeed = [];
     
-    // চ্যানেল এক্সট্রাকশনের সময় সরাসরি চ্যানেলের লিংক (channelUrl) নেওয়া হচ্ছে
-    extractedChannels.forEach(ch => finalFeed.push({
-      type: 'channel', 
-      id: ch.channelId, 
-      title: ch.title?.simpleText,
-      avatar: ch.thumbnail?.thumbnails?.[0]?.url, 
-      subscribers: ch.subscriberCountText?.simpleText,
-      channelUrl: ch.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url 
-    }));
+    // চ্যানেল এক্সট্রাকশন (URL সহ)
+    extractedChannels.forEach(ch => {
+      const avatarUrl = ch.thumbnail?.thumbnails?.[ch.thumbnail.thumbnails.length - 1]?.url || ch.thumbnail?.thumbnails?.[0]?.url || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
+      const channelUrl = ch.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || '';
+      
+      finalFeed.push({
+        type: 'channel', id: ch.channelId, title: ch.title?.simpleText,
+        avatar: avatarUrl.startsWith('//') ? 'https:' + avatarUrl : avatarUrl, 
+        subscribers: ch.subscriberCountText?.simpleText,
+        channelUrl: channelUrl
+      });
+    });
 
     const uniqueShortsMap = new Map();
     extractedShorts.forEach(s => {
@@ -117,33 +171,26 @@ export default function SearchSettingScreen() {
       finalFeed.push({ type: 'shorts_shelf', id: 'shorts_' + Date.now(), shorts: formattedShorts });
     }
 
-    // ভিডিও এক্সট্রাকশনের সময় চ্যানেলের লিংক (channelUrl) নেওয়া হচ্ছে
+    // লং ভিডিও এক্সট্রাকশন (Channel URL সহ)
     const uniqueVideosMap = new Map();
     extractedVideos.forEach(v => {
       if (v.videoId && !uniqueVideosMap.has(v.videoId)) {
+        const avatarUrl = v.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url;
+        const channelUrl = v.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || '';
+
         uniqueVideosMap.set(v.videoId, {
-          type: 'video', 
-          id: v.videoId, 
-          title: v.title?.runs?.[0]?.text,
-          channel: v.ownerText?.runs?.[0]?.text, 
-          views: v.shortViewCountText?.simpleText,
-          duration: v.lengthText?.simpleText, 
-          publishedTime: v.publishedTimeText?.simpleText,
+          type: 'video', id: v.videoId, title: v.title?.runs?.[0]?.text,
+          channel: v.ownerText?.runs?.[0]?.text, views: v.shortViewCountText?.simpleText,
+          duration: v.lengthText?.simpleText, publishedTime: v.publishedTimeText?.simpleText,
           thumbnail: v.thumbnail?.thumbnails?.[v.thumbnail.thumbnails.length - 1]?.url,
-          avatar: v.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url,
-          channelUrl: v.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url 
+          avatar: avatarUrl ? (avatarUrl.startsWith('//') ? 'https:' + avatarUrl : avatarUrl) : 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg',
+          channelUrl: channelUrl
         });
       }
     });
     
     finalFeed.push(...Array.from(uniqueVideosMap.values()));
     return { finalFeed, nextToken };
-  };
-
-  const handleLoadMore = () => {
-    if (isLoadingMore || !continuationToken) return;
-    setIsLoadingMore(true);
-    setTimeout(() => { setIsLoadingMore(false); }, 1500);
   };
 
   const renderItem = ({ item }) => {
@@ -180,13 +227,12 @@ export default function SearchSettingScreen() {
             {item.duration && <View style={styles.duration}><Text style={styles.durationText}>{item.duration}</Text></View>}
           </TouchableOpacity>
           <View style={styles.videoInfo}>
-            {/* লোগোতে চাপ দিলে চ্যানেল লিংক (channelUrl) পাস হবে */}
+            {/* ৩. চ্যানেল স্ক্রিনে যাওয়ার সময় ChannelUrl পাঠানো হচ্ছে */}
             <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar, channelUrl: item.channelUrl })}>
               <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
             </TouchableOpacity>
             <View style={styles.textContainer}>
               <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
-              {/* নামের উপর চাপ দিলেও চ্যানেল লিংক (channelUrl) পাস হবে */}
               <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar, channelUrl: item.channelUrl })}>
                 <Text style={styles.videoMeta}>{item.channel} • {item.views} • {item.publishedTime}</Text>
               </TouchableOpacity>
@@ -225,14 +271,22 @@ export default function SearchSettingScreen() {
         </View>
 
         <View style={styles.searchBar}>
-          <TextInput ref={inputRef} style={styles.input} placeholder="Search MyTube" placeholderTextColor="#888" value={query} onChangeText={handleTextChange} onSubmitEditing={() => { saveHistory(query); fetchSearchResults(query); }} />
+          <TextInput 
+            ref={inputRef} 
+            style={styles.input} 
+            placeholder="Search or Paste YouTube Link..." 
+            placeholderTextColor="#888" 
+            value={query} 
+            onChangeText={handleTextChange} 
+            onSubmitEditing={() => handleSearchSubmit(query)} 
+          />
           {query.length > 0 && <TouchableOpacity onPress={() => setQuery('')}><Ionicons name="close-circle" size={20} color="#AAA" /></TouchableOpacity>}
         </View>
       </View>
 
       {!hasSearched ? (
         <FlatList data={query ? suggestions : history} keyExtractor={(item, index) => index.toString()} renderItem={({item}) => (
-          <TouchableOpacity style={styles.historyItem} onPress={() => { setQuery(item); fetchSearchResults(item); }}>
+          <TouchableOpacity style={styles.historyItem} onPress={() => handleSearchSubmit(item)}>
             <Ionicons name={query ? "search-outline" : "time-outline"} size={22} color="#AAA" />
             <Text style={styles.historyText}>{item}</Text>
           </TouchableOpacity>
@@ -284,7 +338,7 @@ const styles = StyleSheet.create({
   shortTitle: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
   shortViews: { color: '#CCC', fontSize: 10 },
   channelRow: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#222' },
-  channelBigAvatar: { width: 60, height: 60, borderRadius: 30 },
+  channelBigAvatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#333' },
   channelTitleMain: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   channelMetaMain: { color: '#AAA', fontSize: 12 }
 });
