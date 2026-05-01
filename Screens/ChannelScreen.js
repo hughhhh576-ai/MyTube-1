@@ -52,72 +52,72 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 সুপার-স্মার্ট স্ক্যানার: এটি শুধু রেন্ডারার ব্লক থেকেই সঠিক তথ্য আনবে
+  // 🎯 হাইব্রিড স্ক্যানার: আপনার অরিজিনাল লজিকের সাথে স্মার্ট ফিল্টারিং
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
-    const stack = [rootNode];
+    const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
 
     while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
+      const { node, currentTitle } = stack.pop();
 
-      if (Array.isArray(node)) {
-        for (let i = 0; i < node.length; i++) stack.push(node[i]);
-        continue;
+      // প্যারেন্ট থেকে টাইটেল মনে রাখার ট্র্যাকিং
+      let newTitle = currentTitle;
+      if (node && typeof node === 'object') {
+        if (node.title?.runs?.[0]?.text) newTitle = node.title.runs[0].text;
+        else if (node.title?.simpleText) newTitle = node.title.simpleText;
+        else if (node.headline?.simpleText) newTitle = node.headline.simpleText;
       }
 
-      if (typeof node === 'object') {
-        // ১. Load More Token সেভ করা
+      if (Array.isArray(node)) {
+        for (let i = 0; i < node.length; i++) {
+          if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i], currentTitle: newTitle });
+        }
+      } else if (node && typeof node === 'object') {
+        
+        // টোকেন সেভ করা
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        // ২. স্পেসিফিক রেন্ডারার খোঁজা (যেখানে ভিডিওর সব তথ্য এক জায়গায় গোছানো থাকে)
-        const renderer = node.videoRenderer || node.gridVideoRenderer || node.compactVideoRenderer || node.reelItemRenderer; 
+        const vId = node.videoId;
         
-        if (renderer && renderer.videoId) {
-          const vId = renderer.videoId;
+        // 💡 এই লাইনটিই আসল লজিক: ভিডিও আইডির সাথে অন্তত টাইটেল, সময় বা ভিউ থাকতে হবে
+        const isRealVideoObj = vId && (node.title || node.lengthText || node.viewCountText || node.thumbnail);
+
+        if (isRealVideoObj && !seenIds.has(vId)) {
+          seenIds.add(vId);
           
-          if (!seenIds.has(vId)) {
-            seenIds.add(vId);
+          const duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
+          const publishedTime = node.publishedTimeText?.simpleText || node.publishedTimeText?.runs?.[0]?.text || '';
+          const views = node.viewCountText?.simpleText || node.viewCountText?.runs?.[0]?.text || '';
+          const isLive = JSON.stringify(node).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
+          
+          const thumbnailUrl = thumbQuality === 'Data Saver' 
+              ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
+              : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
 
-            // টাইটেল এক্সট্রাক্ট করা
-            let title = 'No Title Found';
-            if (renderer.title?.runs?.[0]?.text) title = renderer.title.runs[0].text;
-            else if (renderer.title?.simpleText) title = renderer.title.simpleText;
-            else if (renderer.headline?.simpleText) title = renderer.headline.simpleText;
+          // যদি এই নোডের ভেতরে সরাসরি টাইটেল না থাকে, তবে আগের ট্র্যাক করা Title ব্যবহার করবে
+          let finalTitle = newTitle !== 'No Title Found' ? newTitle : 'YouTube Video';
+          if (node.title?.runs?.[0]?.text) finalTitle = node.title.runs[0].text;
+          else if (node.title?.simpleText) finalTitle = node.title.simpleText;
 
-            // অন্যান্য মেটা-ডেটা এক্সট্রাক্ট করা
-            const duration = renderer.lengthText?.simpleText || renderer.lengthText?.runs?.[0]?.text || '';
-            const publishedTime = renderer.publishedTimeText?.simpleText || renderer.publishedTimeText?.runs?.[0]?.text || '';
-            const views = renderer.viewCountText?.simpleText || renderer.viewCountText?.runs?.[0]?.text || '';
-            
-            // লাইভ ভিডিও কি না চেক করা
-            const isLive = renderer.badges?.some(badge => badge.metadataBadgeRenderer?.style === 'BADGE_STYLE_TYPE_LIVE_NOW') || false;
-
-            // থাম্বনেইল লজিক
-            const thumbnailUrl = thumbQuality === 'Data Saver' 
-                ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
-                : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
-
-            categorizedData[tabType].push({
-              id: String(vId),
-              title: String(title),
-              value: `https://www.youtube.com/watch?v=${vId}`, 
-              channel: channelName,
-              duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
-              publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
-              views: views,
-              thumbnail: thumbnailUrl,
-              isLive: isLive
-            });
-          }
+          categorizedData[tabType].push({
+            id: String(vId),
+            title: String(finalTitle),
+            value: `https://www.youtube.com/watch?v=${vId}`, 
+            channel: channelName,
+            duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
+            publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
+            views: views,
+            thumbnail: thumbnailUrl,
+            isLive: isLive
+          });
         }
 
-        // ৩. গভীরে যাওয়ার জন্য অবজেক্টের চাইল্ডগুলোকে স্ট্যাকে পুশ করা
+        // গভীরে যাওয়ার জন্য চাইল্ডগুলোকে স্ট্যাকে পুশ করা
         const values = Object.values(node);
         for (let i = 0; i < values.length; i++) {
-          if (values[i] && typeof values[i] === 'object') stack.push(values[i]);
+          if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i], currentTitle: newTitle });
         }
       }
     }
@@ -176,7 +176,6 @@ export default function ChannelScreen() {
       const videosHtml = await videosRes.text();
       const shortsHtml = await shortsRes.text();
 
-      // API Key এক্সট্রাক্ট করা হচ্ছে
       let extractedApiKey = null;
       const apiMatch = videosHtml.match(/"INNERTUBE_API_KEY":"(.*?)"/);
       if (apiMatch && apiMatch[1]) {
@@ -189,11 +188,9 @@ export default function ChannelScreen() {
 
       const categorizedData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
 
-      // --- প্রথম লজিক: HTML থেকে ভিডিও লোড ---
       if (parsedVideosData) extractDataIteratively(parsedVideosData, categorizedData, 'Videos');
       if (parsedShortsData) extractDataIteratively(parsedShortsData, categorizedData, 'Shorts');
 
-      // যদি ভিডিও না পাওয়া যায় তবে হোম পেজ থেকে চেষ্টা
       if (categorizedData.Videos.length === 0 && categorizedData.Shorts.length === 0) {
          try {
             const homeRes = await fetch(`https://www.youtube.com${extractedChannelUrl}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
@@ -207,7 +204,7 @@ export default function ChannelScreen() {
          } catch (err) {}
       }
 
-      // --- দ্বিতীয় লজিক: টোকেন থাকলে প্রথমবারেই আরও ভিডিও লোড করে নেওয়া (Double Load) ---
+      // --- ডাবল লোডিং লজিক ---
       if (categorizedData.VideosToken && extractedApiKey) {
         try {
           const apiRes = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${extractedApiKey}`, {
@@ -238,16 +235,13 @@ export default function ChannelScreen() {
         } catch (e) {}
       }
 
-      // ডুপ্লিকেট ভিডিও মুছে ফেলা
       categorizedData.Videos = categorizedData.Videos.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
       categorizedData.Shorts = categorizedData.Shorts.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
 
-      // সর্বশেষ টোকেন এবং ডেটা স্টেটে সেট করা
       setVideoToken(categorizedData.VideosToken);
       setShortToken(categorizedData.ShortsToken);
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
 
-      // হেডার এবং ব্যানার ডেটা
       if (parsedVideosData) {
         const header = parsedVideosData?.header?.c4TabbedHeaderRenderer || parsedVideosData?.header?.pageHeaderRenderer;
         let bannerSrc = null;
@@ -262,7 +256,6 @@ export default function ChannelScreen() {
     } catch (error) {} finally { setLoading(false); }
   };
 
-  // স্ক্রল করলে পরবর্তী ভিডিও আনার লজিক
   const fetchMoreData = async () => {
     const currentToken = activeTab === 'Videos' ? videoToken : shortToken;
     if (!currentToken || isLoadingMore || !apiKey) return;
@@ -314,12 +307,10 @@ export default function ChannelScreen() {
     navigation.navigate('Player', { videoId: item.id, videoData: item });
   };
 
-  // 🎯 VidMate/NewPipe স্টাইলের প্রিমিয়াম কার্ড রেন্ডারার
   const renderItem = ({ item }) => {
     return (
       <TouchableOpacity style={styles.appCardContainer} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
         <View style={styles.cardLayout}>
-          {/* থাম্বনেইল ও সময় */}
           <View style={styles.thumbnailWrapper}>
             <Image source={{ uri: item.thumbnail }} style={styles.thumbnailImage} />
             {item.duration ? (
@@ -329,7 +320,6 @@ export default function ChannelScreen() {
             ) : null}
           </View>
 
-          {/* বিস্তারিত তথ্য */}
           <View style={styles.infoContainer}>
             <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
             
@@ -341,7 +331,6 @@ export default function ChannelScreen() {
               <Text style={styles.metaText}>{item.publishedTime ? item.publishedTime : 'Unknown time'}</Text>
             </View>
 
-            {/* ভিডিওর লিংক একটি স্পেশাল চিপ আকারে */}
             <View style={styles.linkContainer}>
               <Ionicons name="link" size={12} color="#4A90E2" />
               <Text style={styles.linkText} numberOfLines={1}>{item.value}</Text>
@@ -457,7 +446,6 @@ const styles = StyleSheet.create({
   tabText: { color: '#AAA', fontSize: 15, fontWeight: '500' },
   activeTabText: { color: '#FFF', fontWeight: 'bold' },
   
-  /* --- আপডেটেড কার্ড স্টাইলিং (VidMate/NewPipe Style) --- */
   appCardContainer: { 
     paddingHorizontal: 12,
     paddingVertical: 10,
