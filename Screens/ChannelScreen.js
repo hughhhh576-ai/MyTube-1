@@ -52,25 +52,28 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🎯 আপডেটেড এক্সট্র্যাক্টর: এটি এখন ডেটার অরিজিনাল সিরিয়াল (নতুন থেকে পুরাতন) ধরে রাখবে
+  // 🎯 সুপারফাস্ট এক্সট্র্যাক্টর: পারফরম্যান্স ঠিক রেখে অরিজিনাল সিরিয়াল (নতুন থেকে পুরাতন) মেইনটেইন করবে
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
-    const queue = [{ node: rootNode, currentTitle: 'No Title Found' }];
+    const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
 
-    while (queue.length > 0) {
-      // 💡 shift() ব্যবহার করে উপর থেকে নিচে ক্রমানুসারে ডেটা প্রসেস করা হচ্ছে
-      const { node, currentTitle } = queue.shift(); 
+    while (stack.length > 0) {
+      const { node, currentTitle } = stack.pop();
 
       let newTitle = currentTitle;
-      if (node && typeof node === 'object') {
+      // Array চেক করা হচ্ছে যাতে শুধু অবজেক্টের টাইটেল নেয়
+      if (node && typeof node === 'object' && !Array.isArray(node)) {
         if (node.title?.runs?.[0]?.text) newTitle = node.title.runs[0].text;
         else if (node.title?.simpleText) newTitle = node.title.simpleText;
         else if (node.headline?.simpleText) newTitle = node.headline.simpleText;
       }
 
       if (Array.isArray(node)) {
-        for (let i = 0; i < node.length; i++) {
-          if (node[i] && typeof node[i] === 'object') queue.push({ node: node[i], currentTitle: newTitle });
+        // 💡 ম্যাজিক ট্রিক: Array এর শেষের দিক থেকে স্ট্যাকে ঢোকানো হচ্ছে
+        for (let i = node.length - 1; i >= 0; i--) {
+          if (node[i] && typeof node[i] === 'object') {
+             stack.push({ node: node[i], currentTitle: newTitle });
+          }
         }
       } else if (node && typeof node === 'object') {
         
@@ -110,9 +113,12 @@ export default function ChannelScreen() {
           });
         }
 
+        // 💡 অবজেক্টের ভ্যালুগুলোকেও উল্টো দিক থেকে স্ট্যাকে পুশ করা হচ্ছে
         const values = Object.values(node);
-        for (let i = 0; i < values.length; i++) {
-          if (values[i] && typeof values[i] === 'object') queue.push({ node: values[i], currentTitle: newTitle });
+        for (let i = values.length - 1; i >= 0; i--) {
+          if (values[i] && typeof values[i] === 'object') {
+             stack.push({ node: values[i], currentTitle: newTitle });
+          }
         }
       }
     }
@@ -229,6 +235,7 @@ export default function ChannelScreen() {
         } catch (e) {}
       }
 
+      // ডুপ্লিকেট রিমুভ করা
       categorizedData.Videos = categorizedData.Videos.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
       categorizedData.Shorts = categorizedData.Shorts.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
 
