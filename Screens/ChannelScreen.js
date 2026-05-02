@@ -9,23 +9,6 @@ import { DeviceEventEmitter } from 'react-native';
 const { width } = Dimensions.get('window');
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// 🎯 API থেকে আসা সেকেন্ডকে ফরমেট করার হেল্পার
-const formatDuration = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    return h > 0 ? `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}` : `${m}:${s < 10 ? '0' : ''}${s}`;
-};
-
-// 🎯 API থেকে আসা ভিউজকে ফরমেট করার হেল্পার
-const formatViews = (viewCount) => {
-    const num = parseInt(viewCount);
-    if (isNaN(num)) return viewCount;
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-    return num.toString();
-};
-
 export default function ChannelScreen() {
   const navigation = useNavigation();
   const route = useRoute();
@@ -70,7 +53,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 স্মার্ট স্ক্যানার
+  // 🧠 স্মার্ট স্ক্যানার: এখন শুধু আসল ভিডিও বক্স থেকে ডেটা নেবে
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
@@ -97,6 +80,7 @@ export default function ChannelScreen() {
 
         const vId = node.videoId;
         
+        // 💡 মেইন ফিক্স: ভিডিও আইডি থাকার পাশাপাশি অবশ্যই টাইটেল বা ভিউ বা সময় থাকতে হবে
         const isRealVideoObj = vId && (node.title || node.lengthText || node.viewCountText || node.thumbnail || node.publishedTimeText);
 
         if (isRealVideoObj && !seenIds.has(vId)) {
@@ -111,6 +95,7 @@ export default function ChannelScreen() {
               ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
               : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
 
+          // টাইটেল ভ্যালিডেশন
           let finalTitle = newTitle !== 'No Title Found' ? newTitle : 'YouTube Video';
           if (node.title?.runs?.[0]?.text) finalTitle = node.title.runs[0].text;
           else if (node.title?.simpleText) finalTitle = node.title.simpleText;
@@ -136,10 +121,12 @@ export default function ChannelScreen() {
     }
   };
 
+  // 🎯 নতুন থেকে পুরাতন সর্টিং হেল্পার
   const extractAndSortChunk = (data, tabType, mainDataObj) => {
     const tempObj = { [tabType]: [], [`${tabType}Token`]: null };
     extractDataIteratively(data, tempObj, tabType);
     
+    // ভিডিওর খণ্ডটিকে রিভার্স করে মেইন লিস্টে যোগ করা হচ্ছে
     const sortedChunk = tempObj[tabType].reverse();
     mainDataObj[tabType] = [...mainDataObj[tabType], ...sortedChunk];
     
@@ -156,47 +143,6 @@ export default function ChannelScreen() {
       try { return JSON.parse(match[1]); } catch(e) { return null; }
     }
     return null;
-  };
-
-  // 🚀 নতুন অপ্টিমাইজড API স্ক্যানার (Batch Processing)
-  const enrichDataViaAPI = async (videosList, tabType, currentApiKey) => {
-    if (!videosList || videosList.length === 0 || !currentApiKey) return;
-
-    let currentList = [...videosList];
-    const batchSize = 5; // ৫টি করে ভিডিওর ডেটা ফেচ করবে যাতে ক্র্যাশ না হয়
-
-    for (let i = 0; i < videosList.length; i += batchSize) {
-        const batch = videosList.slice(i, i + batchSize);
-        
-        await Promise.all(batch.map(async (vid, index) => {
-            try {
-                const res = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${currentApiKey}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'User-Agent': DESKTOP_AGENT },
-                    body: JSON.stringify({
-                        context: { client: { clientName: 'WEB', clientVersion: '2.20231214.00.00' } },
-                        videoId: vid.id
-                    })
-                });
-                const textData = await res.text();
-                const data = JSON.parse(textData);
-                const details = data?.videoDetails;
-
-                if (details) {
-                    const globalIndex = i + index;
-                    currentList[globalIndex] = {
-                        ...currentList[globalIndex],
-                        title: details.title || currentList[globalIndex].title,
-                        duration: details.lengthSeconds ? formatDuration(parseInt(details.lengthSeconds)) : currentList[globalIndex].duration,
-                        views: details.viewCount ? `${formatViews(details.viewCount)} views` : currentList[globalIndex].views,
-                    };
-                }
-            } catch (e) {}
-        }));
-
-        // ব্যাচ আপডেট করার পর সাথে সাথে স্ক্রিনে রেন্ডার করে দেবে
-        setTabData(prev => ({ ...prev, [tabType]: [...currentList] }));
-    }
   };
 
   const fetchChannelData = async () => {
@@ -242,11 +188,9 @@ export default function ChannelScreen() {
       const videosHtml = await videosRes.text();
       const shortsHtml = await shortsRes.text();
 
-      let currentApiKey = null;
       const apiMatch = videosHtml.match(/"INNERTUBE_API_KEY":"(.*?)"/);
       if (apiMatch && apiMatch[1]) {
-          currentApiKey = apiMatch[1];
-          setApiKey(currentApiKey);
+          setApiKey(apiMatch[1]);
       }
 
       let parsedVideosData = parseYtData(videosHtml);
@@ -254,25 +198,20 @@ export default function ChannelScreen() {
 
       const categorizedData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
 
+      // সর্টিং হেল্পার দিয়ে ডেটা লোড
       if (parsedVideosData) extractAndSortChunk(parsedVideosData, 'Videos', categorizedData);
       if (parsedShortsData) extractAndSortChunk(parsedShortsData, 'Shorts', categorizedData);
 
-      // 💡 ফিক্সড Fallback Logic: যেকোনো একটি মিসিং হলেই হোমপেজ চেক করবে
-      if (categorizedData.Videos.length === 0 || categorizedData.Shorts.length === 0) {
+      // --- Fallback Logic: হোম পেজ চেক ---
+      if (categorizedData.Videos.length === 0 && categorizedData.Shorts.length === 0) {
          try {
             const homeRes = await fetch(`https://www.youtube.com${extractedChannelUrl}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
             const homeHtml = await homeRes.text();
             const homeData = parseYtData(homeHtml);
 
             if (homeData) {
-               if (categorizedData.Videos.length === 0) {
-                   if (!parsedVideosData) parsedVideosData = homeData; 
-                   extractAndSortChunk(homeData, 'Videos', categorizedData);
-               }
-               if (categorizedData.Shorts.length === 0) {
-                   if (!parsedShortsData) parsedShortsData = homeData;
-                   extractAndSortChunk(homeData, 'Shorts', categorizedData);
-               }
+               if (!parsedVideosData) parsedVideosData = homeData; 
+               extractAndSortChunk(homeData, 'Videos', categorizedData);
             }
          } catch (err) {}
       }
@@ -283,16 +222,7 @@ export default function ChannelScreen() {
       setVideoToken(categorizedData.VideosToken);
       setShortToken(categorizedData.ShortsToken);
 
-      // প্রথমে ওয়েবের ডেটা সেট করে দেওয়া হলো যেন স্ক্রিন খালি না থাকে
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
-
-      // ওয়েবের ডেটা সেট হওয়ার ঠিক পরপরই API কল শুরু হবে
-      if (currentApiKey) {
-          setTimeout(() => {
-              enrichDataViaAPI(categorizedData.Videos, 'Videos', currentApiKey);
-              enrichDataViaAPI(categorizedData.Shorts, 'Shorts', currentApiKey);
-          }, 100); 
-      }
 
       // Header Data
       if (parsedVideosData) {
@@ -330,6 +260,7 @@ export default function ChannelScreen() {
       const newData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
       extractDataIteratively(data, newData, activeTab);
 
+      // Load More এর নতুন ডেটাকেও রিভার্স করে সোজা করা হচ্ছে
       const sortedNewItems = newData[activeTab].reverse();
       const filteredNewItems = sortedNewItems.filter(newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id));
       
@@ -362,6 +293,7 @@ export default function ChannelScreen() {
     navigation.navigate('Player', { videoId: item.id, videoData: item });
   };
 
+  // 🎯 VidMate স্টাইলের রেন্ডারার
   const renderItem = ({ item }) => {
     return (
       <TouchableOpacity style={styles.vidmateCard} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
