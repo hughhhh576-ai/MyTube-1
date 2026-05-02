@@ -25,6 +25,7 @@ export default function ChannelScreen() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLiveChannel, setIsLiveChannel] = useState(false); 
   const [thumbQuality, setThumbQuality] = useState('High');
+  // ডিফল্ট ব্যানার
   const [channelBanner, setChannelBanner] = useState('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop');
   const [subscriberCount, setSubscriberCount] = useState('N/A');
 
@@ -52,13 +53,13 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🎯 ১. ক্রমান্বয় ফিক্স: FIFO Queue ব্যবহার করা হলো যেন ডেটা পারফেক্ট সিরিয়ালে থাকে
+  // 🎯 হাইব্রিড স্ক্যানার + ক্রমান্বয় ফিক্স (Order Fix)
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
-    const queue = [{ node: rootNode, currentTitle: 'No Title Found' }];
+    const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
     const seenIds = new Set();
 
-    while (queue.length > 0) {
-      const { node, currentTitle } = queue.shift(); // shift() ক্রমান্বয় ঠিক রাখে
+    while (stack.length > 0) {
+      const { node, currentTitle } = stack.pop();
 
       let newTitle = currentTitle;
       if (node && typeof node === 'object') {
@@ -67,9 +68,10 @@ export default function ChannelScreen() {
         else if (node.headline?.simpleText) newTitle = node.headline.simpleText;
       }
 
+      // রিভার্স লুপ: যাতে Stack-এ ঢোকার পর বের হওয়ার সময় সঠিক ক্রমান্বয়ে (নতুন থেকে পুরোনো) থাকে
       if (Array.isArray(node)) {
-        for (let i = 0; i < node.length; i++) {
-          if (node[i] && typeof node[i] === 'object') queue.push({ node: node[i], currentTitle: newTitle });
+        for (let i = node.length - 1; i >= 0; i--) {
+          if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i], currentTitle: newTitle });
         }
       } else if (node && typeof node === 'object') {
         
@@ -101,7 +103,6 @@ export default function ChannelScreen() {
             title: String(finalTitle),
             value: `https://www.youtube.com/watch?v=${vId}`, 
             channel: channelName,
-            channelAvatar: channelAvatar, // 🎯 ৩. লোগো মিসিং ফিক্স (Player-এর জন্য)
             duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
             publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
             views: views,
@@ -111,8 +112,9 @@ export default function ChannelScreen() {
         }
 
         const values = Object.values(node);
-        for (let i = 0; i < values.length; i++) {
-          if (values[i] && typeof values[i] === 'object') queue.push({ node: values[i], currentTitle: newTitle });
+        // রিভার্স লুপ
+        for (let i = values.length - 1; i >= 0; i--) {
+          if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i], currentTitle: newTitle });
         }
       }
     }
@@ -199,6 +201,7 @@ export default function ChannelScreen() {
          } catch (err) {}
       }
 
+      // ডাবল লোডিং লজিক
       if (categorizedData.VideosToken && extractedApiKey) {
         try {
           const apiRes = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${extractedApiKey}`, {
@@ -228,7 +231,7 @@ export default function ChannelScreen() {
       setShortToken(categorizedData.ShortsToken);
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
 
-      // 🎯 ২. ব্যানার লজিক ফিক্স
+      // 🎯 ব্যানার এক্সট্রাকশন ফিক্স (HTML Regex + JSON Fallback)
       if (parsedVideosData) {
         let bannerSrc = null;
         const header = parsedVideosData?.header?.c4TabbedHeaderRenderer || parsedVideosData?.header?.pageHeaderRenderer;
@@ -239,7 +242,7 @@ export default function ChannelScreen() {
             bannerSrc = header.content.pageHeaderViewModel.banner.imageBannerViewModel.image.sources;
         }
 
-        // Regex ফালব্যাক
+        // Regex Fallback (HTML থেকে সরাসরি বের করা)
         if (!bannerSrc) {
             const bannerMatch = videosHtml.match(/"imageBannerViewModel":{"image":{"sources":(\[.*?\])}}/);
             if(bannerMatch && bannerMatch[1]) {
@@ -247,12 +250,7 @@ export default function ChannelScreen() {
             }
         }
 
-        if (bannerSrc && bannerSrc.length > 0) {
-            setChannelBanner(bannerSrc[bannerSrc.length - 1].url);
-        } else {
-            // যদি চ্যানেল ব্যানার না থাকে, তবে লোগোকেই ব্যানারে দেখাবে 
-            setChannelBanner(channelAvatar); 
-        }
+        if (bannerSrc && bannerSrc.length > 0) setChannelBanner(bannerSrc[bannerSrc.length - 1].url);
 
         const subs = header?.subscriberCountText?.simpleText || header?.content?.pageHeaderViewModel?.metadata?.metadataRows?.[0]?.metadataParts?.[0]?.text?.content;
         if (subs) setSubscriberCount(subs);
@@ -302,16 +300,20 @@ export default function ChannelScreen() {
     } catch(e) {}
   };
 
+  // 🎯 চ্যানেল লোগো সহ Player-এ পাঠানো
   const handleVideoPress = (item) => {
-    DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: item });
-    navigation.navigate('Player', { videoId: item.id, videoData: item });
+    const videoPayload = { ...item, channelAvatar: channelAvatar }; // লোগো যোগ করা হলো
+    DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: videoPayload });
+    navigation.navigate('Player', { videoId: item.id, videoData: videoPayload });
   };
 
-  // 🎯 ৫. শর্টস ভিডিওর নেভিগেশন ফিক্স (ShortsScreen-এ পাঠাবে)
+  // 🎯 শর্টস ভিডিওর নেভিগেশন (ShortsScreen)
   const handleShortPress = (item) => {
-    navigation.navigate('ShortsScreen', { videoId: item.id, videoData: item });
+    const shortPayload = { ...item, channelAvatar: channelAvatar };
+    navigation.navigate('ShortsScreen', { videoId: item.id, videoData: shortPayload });
   };
 
+  // রেগুলার ভিডিও কার্ড
   const renderVideoItem = ({ item }) => (
     <TouchableOpacity style={styles.appCardContainer} activeOpacity={0.8} onPress={() => handleVideoPress(item)}>
       <View style={styles.cardLayout}>
@@ -340,7 +342,7 @@ export default function ChannelScreen() {
     </TouchableOpacity>
   );
 
-  // 🎯 ৪. শর্টস ভিডিওর প্রিমিয়াম কার্ড (শুধুমাত্র থাম্বনেইল)
+  // 🎯 ইউটিউব স্টাইল শর্টস কার্ড (শুধু থাম্বনেইল, কোনো টেক্সট ছাড়া)
   const renderShortItem = ({ item }) => (
     <TouchableOpacity style={styles.shortCardContainer} activeOpacity={0.9} onPress={() => handleShortPress(item)}>
       <Image source={{ uri: item.thumbnail.replace('hqdefault', 'hq720') }} style={styles.shortThumbnailImage} />
@@ -410,9 +412,9 @@ export default function ChannelScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>{channelName}</Text>
       </View>
       
-      {/* 🎯 শর্টস এর জন্য ৩ কলামের লজিক */}
+      {/* 🎯 শর্টস এবং ভিডিওর জন্য আলাদা গ্রিড লজিক */}
       <FlatList 
-        key={activeTab} // ট্যাব চেঞ্জ হলে গ্রিড রিলোড হবে যেন ক্র্যাশ না করে 
+        key={activeTab === 'Shorts' ? 'shorts-3-cols' : 'videos-1-col'} 
         numColumns={activeTab === 'Shorts' ? 3 : 1}
         data={tabData[activeTab] || []} 
         renderItem={activeTab === 'Shorts' ? renderShortItem : renderVideoItem} 
@@ -467,12 +469,11 @@ const styles = StyleSheet.create({
   linkContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1E293B', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, alignSelf: 'flex-start', marginTop: 2 },
   linkText: { color: '#4A90E2', fontSize: 11, marginLeft: 4, flexShrink: 1 },
   
-  // 🎯 ৪. শর্টস ভিডিওর কার্ড স্টাইল (9:16 রেশিও, ৩ কলাম)
+  // 🎯 শর্টস ভিডিওর কার্ড স্টাইল (9:16 রেশিও)
   shortCardContainer: {
-    width: (width / 3) - 4, // 3 কলামের পারফেক্ট সাইজিং
+    flex: 1/3, // ৩ কলামের গ্রিড
     aspectRatio: 9/16, // অরিজিনাল শর্টস রেশিও
-    marginHorizontal: 2,
-    marginVertical: 4,
+    margin: 2,
     borderRadius: 8,
     overflow: 'hidden',
     backgroundColor: '#222',
