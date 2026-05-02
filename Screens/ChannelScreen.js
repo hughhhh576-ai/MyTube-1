@@ -380,4 +380,4 @@ const styles = StyleSheet.create({
   debugValue: { color: '#0F0' }, // লিংকের কালার সবুজ
   emptyStateContainer: { padding: 40, alignItems: 'center', justifyContent: 'center' },
   emptyStateText: { color: '#AAA', fontSize: 16, fontWeight: '500' }
-});
+})
