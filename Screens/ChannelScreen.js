@@ -53,69 +53,86 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 স্মার্ট স্ক্যানার: এখন শুধু আসল ভিডিও বক্স থেকে ডেটা নেবে
+  // 🧠 উন্নত স্মার্ট স্ক্যানার: ভিডিওর যাবতীয় তথ্য (টাইটেল, ভিউ, সময়) নিখুঁতভাবে বের করার জন্য
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
-    const stack = [{ node: rootNode, currentTitle: 'No Title Found' }];
+    const stack = [{ node: rootNode }];
     const seenIds = new Set();
 
     while (stack.length > 0) {
-      const { node, currentTitle } = stack.pop();
-
-      let newTitle = currentTitle;
-      if (node && typeof node === 'object') {
-        if (node.title?.runs?.[0]?.text) newTitle = node.title.runs[0].text;
-        else if (node.title?.simpleText) newTitle = node.title.simpleText;
-        else if (node.headline?.simpleText) newTitle = node.headline.simpleText;
-      }
+      const { node } = stack.pop();
 
       if (Array.isArray(node)) {
         for (let i = 0; i < node.length; i++) {
-          if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i], currentTitle: newTitle });
+          if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i] });
         }
       } else if (node && typeof node === 'object') {
-
+        
+        // Token extraction (Load More)
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        const vId = node.videoId;
-        
-        // 💡 মেইন ফিক্স: ভিডিও আইডি থাকার পাশাপাশি অবশ্যই টাইটেল বা ভিউ বা সময় থাকতে হবে
-        const isRealVideoObj = vId && (node.title || node.lengthText || node.viewCountText || node.thumbnail || node.publishedTimeText);
+        // YouTube-এর নির্দিষ্ট রেন্ডারার ব্লকগুলো চেক করা হচ্ছে যেখানে ভিডিওর সব ডেটা একসাথে থাকে
+        const videoData = node.videoRenderer || node.gridVideoRenderer || node.compactVideoRenderer || node.reelItemRenderer || (node.videoId ? node : null);
 
-        if (isRealVideoObj && !seenIds.has(vId)) {
-          seenIds.add(vId);
-          
-          const duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
-          const publishedTime = node.publishedTimeText?.simpleText || node.publishedTimeText?.runs?.[0]?.text || '';
-          const views = node.viewCountText?.simpleText || node.viewCountText?.runs?.[0]?.text || '';
-          const isLive = JSON.stringify(node).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
-          
-          const thumbnailUrl = thumbQuality === 'Data Saver' 
-              ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
-              : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
+        if (videoData && videoData.videoId) {
+          const vId = videoData.videoId;
 
-          // টাইটেল ভ্যালিডেশন
-          let finalTitle = newTitle !== 'No Title Found' ? newTitle : 'YouTube Video';
-          if (node.title?.runs?.[0]?.text) finalTitle = node.title.runs[0].text;
-          else if (node.title?.simpleText) finalTitle = node.title.simpleText;
+          // যাচাই করা হচ্ছে এটি আসল ভিডিও অবজেক্ট কিনা
+          if (!seenIds.has(vId) && (videoData.title || videoData.headline || videoData.thumbnail)) {
+            seenIds.add(vId);
 
-          categorizedData[tabType].push({
-            id: String(vId),
-            title: String(finalTitle),
-            value: `https://www.youtube.com/watch?v=${vId}`, 
-            channel: channelName,
-            duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
-            publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
-            views: views,
-            thumbnail: thumbnailUrl,
-            isLive: isLive
-          });
+            // 1. Title Extraction
+            let title = 'YouTube Video';
+            if (videoData.title?.runs?.[0]?.text) title = videoData.title.runs[0].text;
+            else if (videoData.title?.simpleText) title = videoData.title.simpleText;
+            else if (videoData.headline?.runs?.[0]?.text) title = videoData.headline.runs[0].text;
+            else if (videoData.headline?.simpleText) title = videoData.headline.simpleText;
+
+            // 2. Duration Extraction
+            let duration = '';
+            if (videoData.lengthText?.simpleText) duration = videoData.lengthText.simpleText;
+            else if (videoData.lengthText?.runs?.[0]?.text) duration = videoData.lengthText.runs[0].text;
+            else if (tabType === 'Shorts') duration = 'Short';
+
+            // 3. Views Extraction
+            let views = '';
+            if (videoData.viewCountText?.simpleText) views = videoData.viewCountText.simpleText;
+            else if (videoData.viewCountText?.runs?.[0]?.text) views = videoData.viewCountText.runs[0].text;
+            else if (videoData.shortViewCountText?.simpleText) views = videoData.shortViewCountText.simpleText;
+            else if (videoData.shortViewCountText?.runs?.[0]?.text) views = videoData.shortViewCountText.runs[0].text;
+
+            // 4. Published Time Extraction
+            let publishedTime = '';
+            if (videoData.publishedTimeText?.simpleText) publishedTime = videoData.publishedTimeText.simpleText;
+            else if (videoData.publishedTimeText?.runs?.[0]?.text) publishedTime = videoData.publishedTimeText.runs[0].text;
+
+            // 5. Live Check
+            const isLive = JSON.stringify(videoData).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
+            if (isLive) publishedTime = 'Live Now';
+
+            // 6. Thumbnail
+            const thumbnailUrl = thumbQuality === 'Data Saver' 
+                ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
+                : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
+
+            categorizedData[tabType].push({
+              id: String(vId),
+              title: String(title),
+              value: `https://www.youtube.com/watch?v=${vId}`, 
+              channel: channelName,
+              duration: duration,
+              publishedTime: publishedTime,
+              views: views,
+              thumbnail: thumbnailUrl,
+              isLive: isLive
+            });
+          }
         }
 
         const values = Object.values(node);
         for (let i = 0; i < values.length; i++) {
-          if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i], currentTitle: newTitle });
+          if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i] });
         }
       }
     }
