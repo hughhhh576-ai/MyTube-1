@@ -5,7 +5,7 @@ import { useNavigation, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
-const HEADER_HEIGHT = height / 12; // ডিভাইসের ১২ ভাগের ১ ভাগ উচ্চতা
+const HEADER_HEIGHT = height / 12; 
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export default function SearchSettingScreen() {
@@ -21,9 +21,15 @@ export default function SearchSettingScreen() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
   
-  // ইনফিনিট স্ক্রলের জন্য
   const [continuationToken, setContinuationToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
+
+  // [ফিক্স ১]: কিবোর্ড বারবার লোড হওয়া বন্ধ করতে Dependency Array থেকে isFocused সরিয়ে দেওয়া হয়েছে।
+  // এখন শুধু প্রথমবার স্ক্রিনে ঢুকলেই কিবোর্ড ফোকাস হবে।
+  useEffect(() => {
+    const timeout = setTimeout(() => { inputRef.current?.focus(); }, 100);
+    return () => clearTimeout(timeout);
+  }, []);
 
   useEffect(() => {
     const loadData = async () => {
@@ -33,8 +39,6 @@ export default function SearchSettingScreen() {
       } catch (e) {}
     };
     if (isFocused) loadData();
-    const timeout = setTimeout(() => { inputRef.current?.focus(); }, 100);
-    return () => clearTimeout(timeout);
   }, [isFocused]);
 
   const handleTextChange = async (text) => {
@@ -59,17 +63,14 @@ export default function SearchSettingScreen() {
     const text = typeof searchTerm === 'string' ? searchTerm : query;
     if (text.trim().length === 0) return;
 
-    // ১. চেক করা হচ্ছে এটি কোনো ভিডিওর লিংক কি না
     const ytLinkMatch = text.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/|.*embed\/))([^&?\s]{11})/);
     if (ytLinkMatch && ytLinkMatch[1]) {
       Keyboard.dismiss();
       const videoId = ytLinkMatch[1];
-      // লিংক হলে সরাসরি প্লেয়ার স্ক্রিনে পাঠিয়ে দেওয়া হবে
       navigation.navigate('Player', { videoId: videoId, videoData: { id: videoId, title: 'Playing from Link...' } });
       return;
     }
 
-    // লিংক না হলে সাধারণ সার্চ হবে
     saveHistory(text.trim());
     Keyboard.dismiss();
     setQuery(text.trim());
@@ -85,7 +86,6 @@ export default function SearchSettingScreen() {
       const response = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
       const htmlText = await response.text();
       
-      // API Key বের করা (অধিক ফলাফল আনার জন্য)
       const apiMatch = htmlText.match(/"INNERTUBE_API_KEY":"(.*?)"/);
       if (apiMatch && apiMatch[1]) setApiKey(apiMatch[1]);
 
@@ -100,7 +100,6 @@ export default function SearchSettingScreen() {
     } catch (e) {} finally { setIsSearching(false); }
   };
 
-  // ২. InnerTube API এর মাধ্যমে অধিক ফলাফল আনা
   const handleLoadMore = async () => {
     if (isLoadingMore || !continuationToken || !apiKey) return;
     setIsLoadingMore(true);
@@ -130,24 +129,38 @@ export default function SearchSettingScreen() {
     const extractNodes = (node) => {
       if (Array.isArray(node)) node.forEach(extractNodes);
       else if (node && typeof node === 'object') {
-        if (node.videoRenderer) extractedVideos.push(node.videoRenderer);
-        else if (node.reelItemRenderer) extractedShorts.push(node.reelItemRenderer);
-        else if (node.channelRenderer) extractedChannels.push(node.channelRenderer);
-        else if (node.continuationItemRenderer) {
+        
+        // [ফিক্স ২]: স্মার্ট শর্টস ডিটেকশন লজিক
+        if (node.reelItemRenderer) {
+          extractedShorts.push(node.reelItemRenderer);
+        } else if (node.videoRenderer) {
+          // যদি ভিডিওটিতে কোন ডিউরেশন না থাকে বা শর্টস লেখা থাকে, তবে সেটি শর্টস হিসেবে নিবে
+          const isShortBadge = node.videoRenderer.thumbnailOverlays?.some(overlay => overlay.thumbnailOverlayTimeStatusRenderer?.style === 'SHORTS');
+          if (isShortBadge || !node.videoRenderer.lengthText) {
+             extractedShorts.push({
+                videoId: node.videoRenderer.videoId,
+                headline: { simpleText: node.videoRenderer.title?.runs?.[0]?.text },
+                viewCountText: { simpleText: node.videoRenderer.shortViewCountText?.simpleText || node.videoRenderer.viewCountText?.simpleText }
+             });
+          } else {
+             extractedVideos.push(node.videoRenderer);
+          }
+        } else if (node.channelRenderer) {
+          extractedChannels.push(node.channelRenderer);
+        } else if (node.continuationItemRenderer) {
           nextToken = node.continuationItemRenderer.continuationEndpoint?.continuationCommand?.token;
+        } else {
+          Object.values(node).forEach(extractNodes);
         }
-        else Object.values(node).forEach(extractNodes);
       }
     };
     extractNodes(jsonData);
 
     const finalFeed = [];
     
-    // চ্যানেল এক্সট্রাকশন (URL সহ)
     extractedChannels.forEach(ch => {
       const avatarUrl = ch.thumbnail?.thumbnails?.[ch.thumbnail.thumbnails.length - 1]?.url || ch.thumbnail?.thumbnails?.[0]?.url || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
       const channelUrl = ch.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || '';
-      
       finalFeed.push({
         type: 'channel', id: ch.channelId, title: ch.title?.simpleText,
         avatar: avatarUrl.startsWith('//') ? 'https:' + avatarUrl : avatarUrl, 
@@ -160,18 +173,18 @@ export default function SearchSettingScreen() {
     extractedShorts.forEach(s => {
       if (s.videoId && !uniqueShortsMap.has(s.videoId)) {
         uniqueShortsMap.set(s.videoId, {
-          id: s.videoId, title: s.headline?.simpleText, views: s.viewCountText?.simpleText,
-          thumbnail: `https://i.ytimg.com/vi/${s.videoId}/oardefault.jpg`
+          id: s.videoId, title: s.headline?.simpleText || 'Short Video', views: s.viewCountText?.simpleText || 'N/A',
+          thumbnail: `https://i.ytimg.com/vi/${s.videoId}/oardefault.jpg` // Shorts thumbnail format
         });
       }
     });
-    const formattedShorts = Array.from(uniqueShortsMap.values()).slice(0, 12);
+    const formattedShorts = Array.from(uniqueShortsMap.values()).slice(0, 15); // প্রথম ১৫টি শর্টস
 
+    // শর্টস থাকলে সেটি সার্চ রেজাল্টের একদম শুরুতে (চ্যানেলের ঠিক পরে) যোগ করা হলো
     if (formattedShorts.length > 0) {
       finalFeed.push({ type: 'shorts_shelf', id: 'shorts_' + Date.now(), shorts: formattedShorts });
     }
 
-    // লং ভিডিও এক্সট্রাকশন (Channel URL সহ)
     const uniqueVideosMap = new Map();
     extractedVideos.forEach(v => {
       if (v.videoId && !uniqueVideosMap.has(v.videoId)) {
@@ -227,7 +240,6 @@ export default function SearchSettingScreen() {
             {item.duration && <View style={styles.duration}><Text style={styles.durationText}>{item.duration}</Text></View>}
           </TouchableOpacity>
           <View style={styles.videoInfo}>
-            {/* ৩. চ্যানেল স্ক্রিনে যাওয়ার সময় ChannelUrl পাঠানো হচ্ছে */}
             <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar, channelUrl: item.channelUrl })}>
               <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
             </TouchableOpacity>
@@ -274,13 +286,19 @@ export default function SearchSettingScreen() {
           <TextInput 
             ref={inputRef} 
             style={styles.input} 
-            placeholder="Search or Paste YouTube Link..." 
+            placeholder="Search MyTube..." 
             placeholderTextColor="#888" 
             value={query} 
             onChangeText={handleTextChange} 
             onSubmitEditing={() => handleSearchSubmit(query)} 
+            // [ফিক্স ১]: যখনই সার্চ বারে ক্লিক করা হবে, তখন এটি কালো পর্দার হিস্ট্রি মোডে ফিরে যাবে
+            onFocus={() => {
+               if (hasSearched) {
+                  setHasSearched(false);
+               }
+            }}
           />
-          {query.length > 0 && <TouchableOpacity onPress={() => setQuery('')}><Ionicons name="close-circle" size={20} color="#AAA" /></TouchableOpacity>}
+          {query.length > 0 && <TouchableOpacity onPress={() => { setQuery(''); setHasSearched(false); inputRef.current?.focus(); }}><Ionicons name="close-circle" size={20} color="#AAA" /></TouchableOpacity>}
         </View>
       </View>
 
@@ -332,11 +350,14 @@ const styles = StyleSheet.create({
   shortsShelf: { paddingVertical: 15, borderBottomWidth: 4, borderBottomColor: '#222' },
   shelfHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, marginBottom: 12 },
   shelfTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 8 },
-  shortCard: { width: width * 0.38, height: width * 0.65, marginRight: 12, borderRadius: 10, overflow: 'hidden', marginLeft: 12 },
+  
+  // [ফিক্স ২]: শর্টস কার্ডের ডিজাইন ঠিক ইউটিউবের মত 9:16 ভার্টিক্যাল করা হয়েছে
+  shortCard: { width: width * 0.4, height: width * 0.72, marginRight: 12, borderRadius: 12, overflow: 'hidden', marginLeft: 12, backgroundColor: '#222' },
   shortThumb: { width: '100%', height: '100%' },
-  shortOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, backgroundColor: 'rgba(0,0,0,0.4)' },
-  shortTitle: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
-  shortViews: { color: '#CCC', fontSize: 10 },
+  shortOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, backgroundColor: 'rgba(0,0,0,0.6)' },
+  shortTitle: { color: '#FFF', fontSize: 13, fontWeight: 'bold', marginBottom: 2 },
+  shortViews: { color: '#CCC', fontSize: 11 },
+  
   channelRow: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#222' },
   channelBigAvatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#333' },
   channelTitleMain: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
