@@ -33,7 +33,7 @@ export default function ChannelScreen() {
   const [shortToken, setShortToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
 
-  // 🎯 ব্যানার লোডিংয়ের জন্য নতুন স্টেট
+  // 🎯 ব্যানার এবং লোগো লোডিংয়ের স্টেট
   const [channelBanner, setChannelBanner] = useState(null);
   const [isBannerLoaded, setIsBannerLoaded] = useState(false);
 
@@ -126,6 +126,29 @@ export default function ChannelScreen() {
     return null;
   };
 
+  // 🎯 ব্যানার লিংক খোঁজার ডিপ-স্ক্যানার (নতুন লজিক)
+  const findBannerUrl = (data) => {
+    let url = null;
+    const search = (obj) => {
+      if (url) return;
+      if (!obj || typeof obj !== 'object') return;
+
+      const bannerSources = obj.tvBanner?.thumbnails || 
+                            obj.mobileBanner?.thumbnails || 
+                            obj.banner?.thumbnails || 
+                            obj.pageHeaderBannerImageViewModel?.image?.sources;
+
+      if (bannerSources && Array.isArray(bannerSources) && bannerSources.length > 0) {
+        url = bannerSources[bannerSources.length - 1].url; // সবচেয়ে ভালো কোয়ালিটি
+        return;
+      }
+
+      Object.values(obj).forEach(search);
+    };
+    search(data);
+    return url;
+  };
+
   // 🔄 API দিয়ে রিফ্রেশ করার ফাংশন (অক্ষত)
   const reFetchInitialViaApi = async (currentApiKey, vEndpoint, sEndpoint) => {
     try {
@@ -216,6 +239,7 @@ export default function ChannelScreen() {
 
       let parsedVideosData = parseYtData(videosHtml);
       let parsedShortsData = parseYtData(shortsHtml);
+      let homeData = null;
 
       const categorizedData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
 
@@ -226,7 +250,7 @@ export default function ChannelScreen() {
          try {
             const homeRes = await fetch(`https://www.youtube.com${extractedChannelUrl}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
             const homeHtml = await homeRes.text();
-            const homeData = parseYtData(homeHtml);
+            homeData = parseYtData(homeHtml);
             
             if (homeData) {
                if (!parsedVideosData) parsedVideosData = homeData; 
@@ -243,25 +267,19 @@ export default function ChannelScreen() {
 
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
 
-      // 🎯 ব্যানার বের করার শক্তিশালী লজিক (আগের লজিক অক্ষত রেখে পরিবর্ধিত করা হয়েছে)
+      // 🎯 ব্যানার লোড করার স্বয়ংক্রিয় ডিপ-স্ক্যানার লজিক
+      let extractedBanner = null;
+      if (parsedVideosData) extractedBanner = findBannerUrl(parsedVideosData);
+      if (!extractedBanner && parsedShortsData) extractedBanner = findBannerUrl(parsedShortsData);
+      if (!extractedBanner && homeData) extractedBanner = findBannerUrl(homeData);
+
+      if (extractedBanner) {
+        setChannelBanner(extractedBanner);
+      }
+
+      // সাবস্ক্রাইবার কাউন্ট বের করা
       if (parsedVideosData) {
         const header = parsedVideosData?.header?.c4TabbedHeaderRenderer || parsedVideosData?.header?.pageHeaderRenderer;
-        let bannerSrc = null;
-        
-        if (header?.banner?.thumbnails) {
-            bannerSrc = header.banner.thumbnails;
-        } else if (header?.mobileBanner?.thumbnails) {
-            bannerSrc = header.mobileBanner.thumbnails;
-        } else if (header?.tvBanner?.thumbnails) {
-            bannerSrc = header.tvBanner.thumbnails;
-        } else if (header?.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources) {
-            bannerSrc = header.pageHeaderBanner.pageHeaderBannerImageViewModel.image.sources;
-        }
-
-        if (bannerSrc && bannerSrc.length > 0) {
-            setChannelBanner(bannerSrc[bannerSrc.length - 1].url);
-        }
-
         const subs = header?.subscriberCountText?.simpleText || header?.content?.pageHeaderViewModel?.metadata?.metadataRows?.[0]?.metadataParts?.[0]?.text?.content;
         if (subs) setSubscriberCount(subs);
       }
@@ -345,7 +363,7 @@ export default function ChannelScreen() {
     navigation.navigate('Player', { videoId: item.id, videoData: item });
   };
 
-  // 🎯 Shorts এর নতুন নেভিগেশন (ShortsPlayer এর বদলে Shorts)
+  // 🎯 Shorts এর নেভিগেশন
   const handleShortPress = (item, index) => {
     navigation.navigate('Shorts', { 
         videoId: item.id, 
@@ -376,7 +394,7 @@ export default function ChannelScreen() {
     );
   };
 
-  // 📱 শর্টসের কার্ড (শুধুমাত্র থাম্বনেইল, কোনো টাইটেল/ভিউ থাকবে না)
+  // 📱 শর্টসের কার্ড (শুধুমাত্র থাম্বনেইল)
   const renderShortItem = ({ item, index }) => {
     return (
       <TouchableOpacity style={styles.shortCard} activeOpacity={0.8} onPress={() => handleShortPress(item, index)}>
@@ -407,11 +425,11 @@ export default function ChannelScreen() {
       <View style={styles.bannerContainer}>
         {/* এই Image টি আপনার অ্যাপের লোগো হিসেবে থাকবে, যা ব্যানার লোড না হওয়া পর্যন্ত ঝাপসা দেখাবে */}
         <Image 
-            source={{ uri: 'https://via.placeholder.com/800x200/222222/FFFFFF?text=App+Logo' }} // 👈 এখানে আপনার লোগো দিন, যেমন: require('./assets/logo.png')
+            source={{ uri: 'https://via.placeholder.com/800x200/222222/FFFFFF?text=App+Logo' }} // 👈 এখানে আপনার আসল অ্যাপ লোগোর পাথ দিন (যেমন: require('./assets/logo.png'))
             style={[styles.bannerImage, { position: 'absolute' }]} 
-            blurRadius={10} 
+            blurRadius={15} 
         />
-        {/* আসল ব্যানার পেলে এটি দেখাবে */}
+        {/* আসল ব্যানার পেলে এটি লোগোর উপরে দেখাবে */}
         {channelBanner ? (
             <Image 
                 source={{ uri: channelBanner }} 
@@ -534,7 +552,7 @@ const styles = StyleSheet.create({
   shortCard: { 
     width: (width / 3) - 4, 
     marginHorizontal: 2, 
-    marginBottom: 4, // নিচে জায়গা কমিয়ে দেওয়া হলো কারণ লেখা নেই 
+    marginBottom: 4, 
     backgroundColor: '#0F0F0F' 
   },
   shortThumbnailWrapper: {
