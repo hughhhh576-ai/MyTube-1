@@ -5,7 +5,7 @@ import { useNavigation, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
-const HEADER_HEIGHT = height / 12; 
+const HEADER_HEIGHT = height / 12; // ডিভাইসের ১২ ভাগের ১ ভাগ উচ্চতা
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export default function SearchSettingScreen() {
@@ -24,8 +24,6 @@ export default function SearchSettingScreen() {
   const [continuationToken, setContinuationToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
 
-  // [ফিক্স ১]: কিবোর্ড বারবার লোড হওয়া বন্ধ করতে Dependency Array থেকে isFocused সরিয়ে দেওয়া হয়েছে।
-  // এখন শুধু প্রথমবার স্ক্রিনে ঢুকলেই কিবোর্ড ফোকাস হবে।
   useEffect(() => {
     const timeout = setTimeout(() => { inputRef.current?.focus(); }, 100);
     return () => clearTimeout(timeout);
@@ -63,16 +61,18 @@ export default function SearchSettingScreen() {
     const text = typeof searchTerm === 'string' ? searchTerm : query;
     if (text.trim().length === 0) return;
 
+    // কিবোর্ড জোরপূর্বক হাইড করা হচ্ছে
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+
     const ytLinkMatch = text.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/|.*embed\/))([^&?\s]{11})/);
     if (ytLinkMatch && ytLinkMatch[1]) {
-      Keyboard.dismiss();
       const videoId = ytLinkMatch[1];
       navigation.navigate('Player', { videoId: videoId, videoData: { id: videoId, title: 'Playing from Link...' } });
       return;
     }
 
     saveHistory(text.trim());
-    Keyboard.dismiss();
     setQuery(text.trim());
     setSuggestions([]);
     fetchSearchResults(text.trim());
@@ -130,11 +130,9 @@ export default function SearchSettingScreen() {
       if (Array.isArray(node)) node.forEach(extractNodes);
       else if (node && typeof node === 'object') {
         
-        // [ফিক্স ২]: স্মার্ট শর্টস ডিটেকশন লজিক
         if (node.reelItemRenderer) {
           extractedShorts.push(node.reelItemRenderer);
         } else if (node.videoRenderer) {
-          // যদি ভিডিওটিতে কোন ডিউরেশন না থাকে বা শর্টস লেখা থাকে, তবে সেটি শর্টস হিসেবে নিবে
           const isShortBadge = node.videoRenderer.thumbnailOverlays?.some(overlay => overlay.thumbnailOverlayTimeStatusRenderer?.style === 'SHORTS');
           if (isShortBadge || !node.videoRenderer.lengthText) {
              extractedShorts.push({
@@ -171,16 +169,17 @@ export default function SearchSettingScreen() {
 
     const uniqueShortsMap = new Map();
     extractedShorts.forEach(s => {
-      if (s.videoId && !uniqueShortsMap.has(s.videoId)) {
+      // [ফিক্স ১]: যেসব শর্টসের সঠিক আইডি বা টাইটেল নেই, সেগুলো ফিল্টার করে বাদ দেওয়া হলো
+      if (s.videoId && s.headline?.simpleText && !uniqueShortsMap.has(s.videoId)) {
         uniqueShortsMap.set(s.videoId, {
-          id: s.videoId, title: s.headline?.simpleText || 'Short Video', views: s.viewCountText?.simpleText || 'N/A',
-          thumbnail: `https://i.ytimg.com/vi/${s.videoId}/oardefault.jpg` // Shorts thumbnail format
+          id: s.videoId, title: s.headline.simpleText, views: s.viewCountText?.simpleText || 'N/A',
+          thumbnail: `https://i.ytimg.com/vi/${s.videoId}/oardefault.jpg`,
+          type: 'short'
         });
       }
     });
-    const formattedShorts = Array.from(uniqueShortsMap.values()).slice(0, 15); // প্রথম ১৫টি শর্টস
+    const formattedShorts = Array.from(uniqueShortsMap.values()).slice(0, 15);
 
-    // শর্টস থাকলে সেটি সার্চ রেজাল্টের একদম শুরুতে (চ্যানেলের ঠিক পরে) যোগ করা হলো
     if (formattedShorts.length > 0) {
       finalFeed.push({ type: 'shorts_shelf', id: 'shorts_' + Date.now(), shorts: formattedShorts });
     }
@@ -206,6 +205,26 @@ export default function SearchSettingScreen() {
     return { finalFeed, nextToken };
   };
 
+  // [ফিক্স ৩]: ন্যাভিগেশনের সময় সব ইনপুট ফোকাস সরিয়ে দেওয়া হচ্ছে
+  const navigateToPlayer = (item) => {
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+    navigation.navigate('Player', { videoId: item.id, videoData: item });
+  };
+
+  const navigateToShorts = (short) => {
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+    // [ফিক্স ২]: ৩টি প্যারামিটার পাঠানো হচ্ছে যাতে ভুল শর্টস ওপেন না হয়
+    navigation.navigate('Shorts', { initialVideoId: short.id, videoId: short.id, videoData: short });
+  };
+
+  const navigateToChannel = (item) => {
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+    navigation.navigate('Channel', { channelName: item.channel || item.title, channelAvatar: item.avatar, channelUrl: item.channelUrl });
+  };
+
   const renderItem = ({ item }) => {
     if (item.type === 'shorts_shelf') {
       return (
@@ -220,7 +239,7 @@ export default function SearchSettingScreen() {
             data={item.shorts} 
             keyExtractor={(short, index) => short.id + '_' + index.toString()} 
             renderItem={({item: short}) => (
-              <TouchableOpacity style={styles.shortCard} onPress={() => navigation.navigate('Shorts', { initialVideoId: short.id })}>
+              <TouchableOpacity style={styles.shortCard} activeOpacity={0.9} onPress={() => navigateToShorts(short)}>
                 <Image source={{ uri: short.thumbnail }} style={styles.shortThumb} />
                 <View style={styles.shortOverlay}>
                   <Text style={styles.shortTitle} numberOfLines={2}>{short.title}</Text>
@@ -235,17 +254,17 @@ export default function SearchSettingScreen() {
     if (item.type === 'video') {
       return (
         <View style={styles.videoCard}>
-          <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
+          <TouchableOpacity activeOpacity={0.9} onPress={() => navigateToPlayer(item)}>
             <Image source={{ uri: item.thumbnail }} style={styles.thumbnail} />
             {item.duration && <View style={styles.duration}><Text style={styles.durationText}>{item.duration}</Text></View>}
           </TouchableOpacity>
           <View style={styles.videoInfo}>
-            <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar, channelUrl: item.channelUrl })}>
+            <TouchableOpacity activeOpacity={0.8} onPress={() => navigateToChannel(item)}>
               <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
             </TouchableOpacity>
             <View style={styles.textContainer}>
               <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
-              <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar, channelUrl: item.channelUrl })}>
+              <TouchableOpacity activeOpacity={0.8} onPress={() => navigateToChannel(item)}>
                 <Text style={styles.videoMeta}>{item.channel} • {item.views} • {item.publishedTime}</Text>
               </TouchableOpacity>
             </View>
@@ -256,7 +275,7 @@ export default function SearchSettingScreen() {
 
     if (item.type === 'channel') {
       return (
-        <TouchableOpacity style={styles.channelRow} onPress={() => navigation.navigate('Channel', { channelName: item.title, channelAvatar: item.avatar, channelUrl: item.channelUrl })}>
+        <TouchableOpacity style={styles.channelRow} onPress={() => navigateToChannel(item)}>
           <Image source={{ uri: item.avatar }} style={styles.channelBigAvatar} />
           <View style={{ flex: 1, marginLeft: 15 }}>
             <Text style={styles.channelTitleMain}>{item.title}</Text>
@@ -291,37 +310,44 @@ export default function SearchSettingScreen() {
             value={query} 
             onChangeText={handleTextChange} 
             onSubmitEditing={() => handleSearchSubmit(query)} 
-            // [ফিক্স ১]: যখনই সার্চ বারে ক্লিক করা হবে, তখন এটি কালো পর্দার হিস্ট্রি মোডে ফিরে যাবে
-            onFocus={() => {
-               if (hasSearched) {
-                  setHasSearched(false);
-               }
-            }}
+            onFocus={() => { if (hasSearched) setHasSearched(false); }}
+            autoCorrect={false}
+            autoCapitalize="none"
           />
           {query.length > 0 && <TouchableOpacity onPress={() => { setQuery(''); setHasSearched(false); inputRef.current?.focus(); }}><Ionicons name="close-circle" size={20} color="#AAA" /></TouchableOpacity>}
         </View>
       </View>
 
-      {!hasSearched ? (
-        <FlatList data={query ? suggestions : history} keyExtractor={(item, index) => index.toString()} renderItem={({item}) => (
-          <TouchableOpacity style={styles.historyItem} onPress={() => handleSearchSubmit(item)}>
-            <Ionicons name={query ? "search-outline" : "time-outline"} size={22} color="#AAA" />
-            <Text style={styles.historyText}>{item}</Text>
-          </TouchableOpacity>
-        )} keyboardShouldPersistTaps="handled" />
-      ) : isSearching ? (
-        <View style={styles.center}><ActivityIndicator size="large" color="#FF0000" /></View>
-      ) : (
-        <FlatList 
-          data={searchResults} 
-          keyExtractor={(item, index) => item.id + '_' + index.toString()} 
-          renderItem={renderItem} 
-          onEndReached={handleLoadMore} 
-          onEndReachedThreshold={0.5} 
-          ListFooterComponent={isLoadingMore && <ActivityIndicator color="#FF0000" style={{ margin: 20 }} />} 
-          contentContainerStyle={{ paddingBottom: 20 }} 
-        />
-      )}
+      {/* [ফিক্স ৩]: display: none ব্যবহার করে সার্চ রেজাল্ট মেমোরিতে ধরে রাখা হচ্ছে, যাতে স্ক্রল পজিশন না হারায় */}
+      <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, display: !hasSearched ? 'flex' : 'none' }}>
+          <FlatList 
+            data={query ? suggestions : history} 
+            keyExtractor={(item, index) => index.toString()} 
+            renderItem={({item}) => (
+              <TouchableOpacity style={styles.historyItem} onPress={() => handleSearchSubmit(item)}>
+                <Ionicons name={query ? "search-outline" : "time-outline"} size={22} color="#AAA" />
+                <Text style={styles.historyText}>{item}</Text>
+              </TouchableOpacity>
+          )} keyboardShouldPersistTaps="handled" />
+        </View>
+
+        <View style={{ flex: 1, display: hasSearched ? 'flex' : 'none' }}>
+          {isSearching ? (
+            <View style={styles.center}><ActivityIndicator size="large" color="#FF0000" /></View>
+          ) : (
+            <FlatList 
+              data={searchResults} 
+              keyExtractor={(item, index) => item.id + '_' + index.toString()} 
+              renderItem={renderItem} 
+              onEndReached={handleLoadMore} 
+              onEndReachedThreshold={0.5} 
+              ListFooterComponent={isLoadingMore && <ActivityIndicator color="#FF0000" style={{ margin: 20 }} />} 
+              contentContainerStyle={{ paddingBottom: 20 }} 
+            />
+          )}
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -350,14 +376,11 @@ const styles = StyleSheet.create({
   shortsShelf: { paddingVertical: 15, borderBottomWidth: 4, borderBottomColor: '#222' },
   shelfHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, marginBottom: 12 },
   shelfTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 8 },
-  
-  // [ফিক্স ২]: শর্টস কার্ডের ডিজাইন ঠিক ইউটিউবের মত 9:16 ভার্টিক্যাল করা হয়েছে
   shortCard: { width: width * 0.4, height: width * 0.72, marginRight: 12, borderRadius: 12, overflow: 'hidden', marginLeft: 12, backgroundColor: '#222' },
   shortThumb: { width: '100%', height: '100%' },
   shortOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, backgroundColor: 'rgba(0,0,0,0.6)' },
   shortTitle: { color: '#FFF', fontSize: 13, fontWeight: 'bold', marginBottom: 2 },
   shortViews: { color: '#CCC', fontSize: 11 },
-  
   channelRow: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#222' },
   channelBigAvatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#333' },
   channelTitleMain: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
