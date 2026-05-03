@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, SafeAreaView, Platform, StatusBar, Keyboard, ActivityIndicator, Image, Dimensions, InteractionManager } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, SafeAreaView, Platform, StatusBar, Keyboard, ActivityIndicator, Image, InteractionManager } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useIsFocused, useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const { width, height } = Dimensions.get('window');
-const HEADER_HEIGHT = height / 12; // ডিভাইসের ১২ ভাগের ১ ভাগ উচ্চতা
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export default function SearchSettingScreen() {
@@ -26,7 +24,6 @@ export default function SearchSettingScreen() {
   const [continuationToken, setContinuationToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
 
-  // শুধুমাত্র প্রথমবার অ্যাপে ঢুকলে কিবোর্ড অন হবে, যদি আগে থেকে কোন সার্চ করা না থাকে
   useEffect(() => {
     if (!query) {
       InteractionManager.runAfterInteractions(() => {
@@ -36,7 +33,6 @@ export default function SearchSettingScreen() {
     }
   }, []);
 
-  // স্ক্রিনে ফিরে আসলে কিবোর্ড এবং ফোকাস ক্লিয়ার রাখা হচ্ছে (ফ্রিজ সমস্যা রোধে InteractionManager যুক্ত করা হলো)
   useFocusEffect(
     useCallback(() => {
       if (showResults) {
@@ -190,7 +186,6 @@ export default function SearchSettingScreen() {
     const uniqueShortsMap = new Map();
     extractedShorts.forEach(s => {
       if (s.videoId && s.headline?.simpleText && !uniqueShortsMap.has(s.videoId)) {
-        
         let thumbUrl = `https://i.ytimg.com/vi/${s.videoId}/oardefault.jpg`;
         if (s.thumbnail?.thumbnails?.length > 0) {
             thumbUrl = s.thumbnail.thumbnails[0].url.split('?')[0]; 
@@ -203,6 +198,8 @@ export default function SearchSettingScreen() {
         });
       }
     });
+    
+    // শর্টস কার্ডের সাইজ অনুযায়ী ডিজাইনে সামঞ্জস্য আনতে
     const formattedShorts = Array.from(uniqueShortsMap.values()).slice(0, 15);
 
     if (formattedShorts.length > 0) {
@@ -230,7 +227,6 @@ export default function SearchSettingScreen() {
     return { finalFeed, nextToken };
   };
 
-  // ন্যাভিগেশনে InteractionManager ব্যবহার করা হলো যাতে স্ক্রিন ফ্রিজ না হয়
   const navigateToPlayer = (item) => {
     Keyboard.dismiss();
     inputRef.current?.blur();
@@ -320,22 +316,22 @@ export default function SearchSettingScreen() {
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" translucent={true} />
       
+      {/* হেডার অংশ এক লাইনে আনা হয়েছে */}
       <View style={styles.searchHeader}>
-        <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn}>
-            <Ionicons name="arrow-back" size={24} color="#FFF" />
-          </TouchableOpacity>
-          <View style={styles.logoBox}>
-            <Ionicons name="logo-youtube" size={22} color="#FF0000" />
-            <Text style={styles.logoText}>MyTube</Text>
-          </View>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn}>
+          <Ionicons name="arrow-back" size={24} color="#FFF" />
+        </TouchableOpacity>
+        
+        <View style={styles.logoBox}>
+          <Ionicons name="logo-youtube" size={22} color="#FF0000" />
+          <Text style={styles.logoText}>MyTube</Text>
         </View>
 
         <View style={styles.searchBar}>
           <TextInput 
             ref={inputRef} 
             style={styles.input} 
-            placeholder="Search MyTube..." 
+            placeholder="Search..." 
             placeholderTextColor="#888" 
             value={query} 
             onChangeText={handleTextChange} 
@@ -346,7 +342,11 @@ export default function SearchSettingScreen() {
             autoCorrect={false}
             autoCapitalize="none"
           />
-          {query.length > 0 && <TouchableOpacity onPress={() => { setQuery(''); setShowResults(false); inputRef.current?.focus(); }}><Ionicons name="close-circle" size={20} color="#AAA" /></TouchableOpacity>}
+          {query.length > 0 && (
+            <TouchableOpacity onPress={() => { setQuery(''); setShowResults(false); inputRef.current?.focus(); }}>
+              <Ionicons name="close-circle" size={18} color="#AAA" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -374,7 +374,6 @@ export default function SearchSettingScreen() {
                 onEndReachedThreshold={0.5} 
                 ListFooterComponent={isLoadingMore && <ActivityIndicator color="#FF0000" style={{ margin: 20 }} />} 
                 contentContainerStyle={{ paddingBottom: 20 }} 
-                // স্ক্রল পারফরম্যান্স অপটিমাইজেশন
                 removeClippedSubviews={true} 
                 initialNumToRender={10} 
                 maxToRenderPerBatch={10} 
@@ -390,13 +389,31 @@ export default function SearchSettingScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0F0F0F', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
-  searchHeader: { height: HEADER_HEIGHT, backgroundColor: '#0F0F0F', paddingHorizontal: 12, justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: '#222' },
-  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
-  logoBox: { flexDirection: 'row', alignItems: 'center', marginLeft: 10 },
-  logoText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 5 },
-  iconBtn: { padding: 5 },
-  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#222', borderRadius: 20, height: 35, paddingHorizontal: 15 },
+  
+  // হেডারের স্টাইল এক লাইনের জন্য আপডেট করা হয়েছে
+  searchHeader: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    height: 60, 
+    backgroundColor: '#0F0F0F', 
+    paddingHorizontal: 10, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#222' 
+  },
+  iconBtn: { padding: 4, marginRight: 8 },
+  logoBox: { flexDirection: 'row', alignItems: 'center', marginRight: 12 },
+  logoText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
+  searchBar: { 
+    flex: 1, // সার্চ বার যেন বাকি সব জায়গা নিয়ে নেয়
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#222', 
+    borderRadius: 20, 
+    height: 38, 
+    paddingHorizontal: 15 
+  },
   input: { flex: 1, color: '#FFF', fontSize: 14, paddingVertical: 0 },
+  
   historyItem: { flexDirection: 'row', alignItems: 'center', padding: 15 },
   historyText: { color: '#FFF', fontSize: 16, marginLeft: 15 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -412,7 +429,7 @@ const styles = StyleSheet.create({
   shortsShelf: { paddingVertical: 15, borderBottomWidth: 4, borderBottomColor: '#222' },
   shelfHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, marginBottom: 12 },
   shelfTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 8 },
-  shortCard: { width: width * 0.4, height: width * 0.72, marginRight: 12, borderRadius: 12, overflow: 'hidden', marginLeft: 12, backgroundColor: '#222' },
+  shortCard: { width: Dimensions.get('window').width * 0.4, height: Dimensions.get('window').width * 0.72, marginRight: 12, borderRadius: 12, overflow: 'hidden', marginLeft: 12, backgroundColor: '#222' },
   shortThumb: { width: '100%', height: '100%' },
   shortOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, backgroundColor: 'rgba(0,0,0,0.6)' },
   shortTitle: { color: '#FFF', fontSize: 13, fontWeight: 'bold', marginBottom: 2 },
