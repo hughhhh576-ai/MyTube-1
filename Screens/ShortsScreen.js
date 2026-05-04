@@ -1,24 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Share } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation, useIsFocused } from '@react-navigation/native';
-import React, { useState, useCallback } from 'react';
-
-const [isVideoVisible, setIsVideoVisible] = useState(true);
-
-useFocusEffect(
-  useCallback(() => {
-    setIsVideoVisible(true); // স্ক্রিনে থাকলে ভিডিও দেখাবে
-    return () => {
-      setIsVideoVisible(false); // ব্যাক বাটন চাপলেই ভিডিও ধ্বংস হয়ে যাবে!
-    };
-  }, [])
-);
-
-// আর যেখানে ভিডিও প্লেয়ারের কোড আছে সেখানে চেকটি বসিয়ে দিন:
-// {isVideoVisible && <VideoPlayer ... />}
+import { useNavigation, useIsFocused, useFocusEffect } from '@react-navigation/native';
 
 // ৪টি আলাদা কোয়ালিটির জন্য ৪টি ভিন্ন মোবাইলের সুরত (User-Agents)
 const UAS = {
@@ -31,43 +16,64 @@ const UAS = {
 export default function ShortsScreen({ initialVideoId, route }) {
   const navigation = useNavigation();
   const isFocused = useIsFocused();
-  
+
+  // [NEW LOGIC]: স্ক্রিন অ্যাক্টিভ আছে কি না তা ট্র্যাক করার স্টেট
+  const [isActive, setIsActive] = useState(true);
+
   const [isAutoSkipping, setIsAutoSkipping] = useState(false);
   const [shortsLoading, setShortsLoading] = useState(true);
   const [uaReady, setUaReady] = useState(false); 
-  
+
   const [showUnmuteBtn, setShowUnmuteBtn] = useState(false);
   const [showActionBtns, setShowActionBtns] = useState(false);
-  
+
   const [deviceUserAgent, setDeviceUserAgent] = useState(UAS.normal);
   const [webviewKey, setWebviewKey] = useState(Date.now().toString());
-  
-  // [NEW]: নেটওয়ার্ক এবং হার্ডওয়্যার ফেক করার জন্য স্টেট
+
   const [hardwareMockScript, setHardwareMockScript] = useState('');
-  
+
   const [currentUrl, setCurrentUrl] = useState(`https://m.youtube.com/shorts/${initialVideoId || route?.params?.videoId || ''}`);
   const [currentChannel, setCurrentChannel] = useState({ name: 'Unknown Channel', isSubscribed: false });
-  
+
   const subscribeTimerRef = useRef(null);
   const currentChannelNameRef = useRef(''); 
   const shortsWebViewRef = useRef(null);
 
   const targetUri = initialVideoId || route?.params?.videoId ? `https://m.youtube.com/shorts/${initialVideoId || route?.params?.videoId}` : "https://m.youtube.com/shorts";
 
+  // [CRITICAL FIX]: ব্যাক করার সাথে সাথে সম্পর্ক ছিন্ন করার লজিক
+  useFocusEffect(
+    useCallback(() => {
+      setIsActive(true);
+      return () => {
+        // স্ক্রিন থেকে বের হওয়ার সাথে সাথে ভিডিও পজ করে ধ্বংস করা হচ্ছে
+        if (shortsWebViewRef.current) {
+          shortsWebViewRef.current.injectJavaScript(`
+            try {
+              var v = document.querySelector('video');
+              if(v) { v.pause(); v.removeAttribute('src'); v.load(); }
+            } catch(e) {}
+            true;
+          `);
+        }
+        setIsActive(false);
+        setUaReady(false);
+      };
+    }, [])
+  );
+
   useEffect(() => {
-    if (isFocused) {
+    if (isFocused && isActive) {
       setUaReady(false); 
       setShortsLoading(true);
-      
+
       const qualityVal = global.shortVideoQuality || 'Normal Video Quality';
-      
+
       let newUA = UAS.normal;
       let mockJS = '';
 
-      // [CRITICAL TRICK]: পেজ লোড হওয়ার আগেই ইউটিউবকে ফেক হার্ডওয়্যার ও ফেক নেটওয়ার্ক স্পিডের তথ্য দেওয়া
       if (qualityVal === 'Anti Data Saver Mode' || qualityVal === 'Low Video Quality') {
         newUA = qualityVal === 'Anti Data Saver Mode' ? UAS.anti : UAS.low;
-        // ফেক 2G নেটওয়ার্ক এবং 1GB র‍্যাম, Data Saver = ON
         mockJS = `
           Object.defineProperty(navigator, 'connection', { get: function() { return { effectiveType: '2g', saveData: true, downlink: 0.1, rtt: 600 }; } });
           Object.defineProperty(navigator, 'deviceMemory', { get: function() { return 1; } });
@@ -77,7 +83,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
       } 
       else if (qualityVal === 'High Video Quality 4k-8k') {
         newUA = UAS.high;
-        // ফেক 4G/5G নেটওয়ার্ক এবং 8GB র‍্যাম, Data Saver = OFF
         mockJS = `
           Object.defineProperty(navigator, 'connection', { get: function() { return { effectiveType: '4g', saveData: false, downlink: 10.0, rtt: 50 }; } });
           Object.defineProperty(navigator, 'deviceMemory', { get: function() { return 8; } });
@@ -87,7 +92,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
       } 
       else {
         newUA = UAS.normal;
-        // ফেক 3G নেটওয়ার্ক
         mockJS = `
           Object.defineProperty(navigator, 'connection', { get: function() { return { effectiveType: '3g', saveData: false, downlink: 1.5, rtt: 150 }; } });
           Object.defineProperty(window, 'devicePixelRatio', { get: function() { return 2; } });
@@ -97,10 +101,10 @@ export default function ShortsScreen({ initialVideoId, route }) {
       setDeviceUserAgent(newUA);
       setHardwareMockScript(mockJS);
       setWebviewKey(Date.now().toString()); 
-      
+
       setTimeout(() => setUaReady(true), 100);
     }
-  }, [isFocused]);
+  }, [isFocused, isActive]);
 
   const restartActionTimer = () => {
     setShowActionBtns(false);
@@ -111,7 +115,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
   };
 
   useEffect(() => {
-    if (uaReady) {
+    if (uaReady && isActive) {
       setShowUnmuteBtn(false);
       const timerLoading = setTimeout(() => setShortsLoading(false), 2000);
       const timerUnmute = setTimeout(() => setShowUnmuteBtn(true), 10000); 
@@ -121,7 +125,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
         clearTimeout(timerUnmute); 
       };
     }
-  }, [uaReady, targetUri]);
+  }, [uaReady, targetUri, isActive]);
 
   const handleNativeSubscribe = async () => {
     let channelNameToSave = currentChannel.name;
@@ -131,10 +135,10 @@ export default function ShortsScreen({ initialVideoId, route }) {
       let subs = await AsyncStorage.getItem('subscribedChannels');
       let parsedSubs = subs ? JSON.parse(subs) : [];
       const isSubbed = parsedSubs.some(s => s.name === channelNameToSave);
-      
+
       if (isSubbed) parsedSubs = parsedSubs.filter(s => s.name !== channelNameToSave);
       else parsedSubs.push({ id: Date.now().toString(), name: channelNameToSave, avatar: 'https://via.placeholder.com/150' });
-      
+
       await AsyncStorage.setItem('subscribedChannels', JSON.stringify(parsedSubs));
       setCurrentChannel(prev => ({ ...prev, isSubscribed: !isSubbed }));
     } catch (e) {}
@@ -236,6 +240,11 @@ export default function ShortsScreen({ initialVideoId, route }) {
     }
   };
 
+  // [DISCONNECT LOGIC]: যদি স্ক্রিন ফোকাস না থাকে বা ইউজার ব্যাক করে, তবে WebView একদম আনমাউন্ট (Unmount) হয়ে যাবে
+  if (!isActive || !isFocused) {
+    return <View style={styles.container} />; // পুরোপুরি কালো পর্দা (WebView ধ্বংস)
+  }
+
   if (!uaReady) {
     return (
       <View style={styles.loadingOverlay}>
@@ -251,7 +260,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
         ref={shortsWebViewRef} 
         source={{ uri: targetUri }} 
         userAgent={deviceUserAgent} 
-        // [CRITICAL FIX]: ইউটিউব লোড হওয়ার আগেই ফেক ইন্টারনেট স্পিড ও র‍্যামের তথ্য ব্রাউজারে ইনজেক্ট করে দেওয়া হলো
         injectedJavaScriptBeforeContentLoaded={hardwareMockScript} 
         injectedJavaScript={shortsInjectScript} 
         onMessage={onShortsMessage} 
@@ -294,7 +302,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
           <Text style={styles.skipText}>অ্যাড ফিল্টার হচ্ছে...</Text>
         </View>
       )}
-      
+
       {shortsLoading && !isAutoSkipping && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color="#FF0000" />
