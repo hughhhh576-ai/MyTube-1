@@ -6,7 +6,6 @@ import * as NavigationBar from 'expo-navigation-bar';
 
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// নিচের মেইন ভিডিও লিস্টের জন্য মিক্সড কিউরি
 const LIVE_QUERIES = [
   "bangladesh live tv channel 24/7",
   "india live tv channel hindi news",
@@ -15,7 +14,6 @@ const LIVE_QUERIES = [
   "live movie tv channel"
 ];
 
-// উপরের চ্যানেল লিস্টের জন্য সিরিয়াল কিউরি (প্রথমে বাংলাদেশ, তারপর ভারত, তারপর পাকিস্তান, তারপর বিশ্ব)
 const TOP_BAR_QUERIES = [
   "bangladesh live tv channel 24/7",
   "bangladesh news live stream",
@@ -32,38 +30,32 @@ export default function LiveScreen() {
   const navigation = useNavigation();
   const isFocused = useIsFocused();
   
-  // মেইন ভিডিও স্টেট
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [activeQuery, setActiveQuery] = useState(LIVE_QUERIES[0]);
 
-  // উপরের চ্যানেল লিস্ট স্টেট
   const [topChannels, setTopChannels] = useState([]);
   const [topQueryIndex, setTopQueryIndex] = useState(0);
   const [isFetchingTopChannels, setIsFetchingTopChannels] = useState(false);
 
-  // Immersive Mode
   useEffect(() => {
     if (isFocused && Platform.OS === 'android') {
       NavigationBar.setVisibilityAsync("hidden");
     }
   }, [isFocused]);
 
-  // প্রথমে লোড করার সময়
   useEffect(() => {
     const randomQuery = LIVE_QUERIES[Math.floor(Math.random() * LIVE_QUERIES.length)];
     setActiveQuery(randomQuery);
     fetchLiveVideos(randomQuery, true);
     
-    // উপরের চ্যানেল লিস্ট লোড শুরু করা
     fetchTopChannels(0);
   }, []);
 
   const handleRefresh = () => {
     setRefreshing(true);
-    // রিফ্রেশ করলে আবার প্রথম থেকে (বাংলাদেশ থেকে) চ্যানেল লোড হবে
     setTopChannels([]);
     fetchTopChannels(0);
 
@@ -78,7 +70,6 @@ export default function LiveScreen() {
     fetchLiveVideos(activeQuery, false);
   };
 
-  // উপরের চ্যানেল লিস্ট ডানদিকে স্ক্রল করলে আরো চ্যানেল লোড হবে
   const loadMoreTopChannels = () => {
     if (isFetchingTopChannels || topQueryIndex >= TOP_BAR_QUERIES.length) return;
     fetchTopChannels(topQueryIndex);
@@ -92,7 +83,19 @@ export default function LiveScreen() {
     return bestImgUrl.startsWith('//') ? 'https:' + bestImgUrl : bestImgUrl;
   };
 
-  // উপরের হরাইজন্টাল চ্যানেল লিস্ট ফেচ করার ফাংশন
+  // SearchSettingScreen এর হুবহু লজিক অনুযায়ী Channel স্ক্রিনে পুশ করার ফাংশন
+  const navigateToChannel = (item) => {
+    setTimeout(() => {
+        navigation.navigate('Channel', { 
+            channelName: item.channel || item.name, 
+            channelAvatar: item.avatar || item.logo, 
+            channelUrl: item.channelUrl,
+            videoId: item.id || item.liveVideoId, 
+            videoLink: `https://www.youtube.com/watch?v=${item.id || item.liveVideoId}` 
+        });
+    }, 0);
+  };
+
   const fetchTopChannels = async (queryIndex) => {
     setIsFetchingTopChannels(true);
     try {
@@ -113,16 +116,23 @@ export default function LiveScreen() {
                 const vid = node.videoRenderer;
                 const channelName = vid.ownerText?.runs?.[0]?.text;
                 const channelId = vid.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId;
-                const avatar = getHighQualityThumbnail(vid.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail, null);
+                
+                // SearchSettingScreen এর মতো করে লোগো এক্সট্র্যাক্ট করা হয়েছে
+                const rawAvatarUrl = vid.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url;
+                const finalAvatar = rawAvatarUrl ? (rawAvatarUrl.startsWith('//') ? 'https:' + rawAvatarUrl : rawAvatarUrl) : 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
+                
+                // SearchSettingScreen এর মতো চ্যানেল ইউআরএল এক্সট্র্যাক্ট
+                const channelUrl = vid.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || '';
+                
                 const liveVideoId = vid.videoId;
 
                 if (channelName && channelId && liveVideoId) {
-                    // একই রিকোয়েস্টে ডাবল চ্যানেল যেন না আসে
                     if (!newChannels.some(c => c.id === channelId)) {
                         newChannels.push({
                             id: channelId,
                             name: channelName,
-                            logo: avatar,
+                            logo: finalAvatar,
+                            channelUrl: channelUrl,
                             liveVideoId: liveVideoId
                         });
                     }
@@ -132,7 +142,6 @@ export default function LiveScreen() {
         };
         extractNodes(jsonData);
 
-        // আগের চ্যানেলগুলোর সাথে নতুনগুলো সঠিকভাবে যুক্ত করা হচ্ছে
         setTopChannels(prev => {
             const uniqueNewChannels = newChannels.filter(nc => !prev.some(pc => pc.id === nc.id));
             return queryIndex === 0 ? uniqueNewChannels : [...prev, ...uniqueNewChannels];
@@ -169,16 +178,24 @@ export default function LiveScreen() {
         };
         extractNodes(jsonData);
 
-        const formattedVideos = extractedVideos.map(vid => ({
-            id: vid.videoId, 
-            title: vid.title?.runs?.[0]?.text || 'No Title', 
-            channel: vid.ownerText?.runs?.[0]?.text || 'Channel',
-            channelId: vid.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId || '',
-            views: vid.shortViewCountText?.simpleText || vid.viewCountText?.simpleText || 'Live Now', 
-            timeText: vid.publishedTimeText?.simpleText || vid.dateText?.simpleText || 'Started recently',
-            thumbnail: getHighQualityThumbnail(vid.thumbnail, vid.videoId), 
-            avatar: getHighQualityThumbnail(vid.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail, null)
-        }));
+        const formattedVideos = extractedVideos.map(vid => {
+            // SearchSettingScreen এর মতো করে লোগো ও URL এক্সট্র্যাক্ট করা হয়েছে
+            const rawAvatarUrl = vid.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url;
+            const finalAvatar = rawAvatarUrl ? (rawAvatarUrl.startsWith('//') ? 'https:' + rawAvatarUrl : rawAvatarUrl) : 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
+            const channelUrl = vid.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || '';
+
+            return {
+              id: vid.videoId, 
+              title: vid.title?.runs?.[0]?.text || 'No Title', 
+              channel: vid.ownerText?.runs?.[0]?.text || 'Channel',
+              channelId: vid.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId || '',
+              channelUrl: channelUrl,
+              views: vid.shortViewCountText?.simpleText || vid.viewCountText?.simpleText || 'Live Now', 
+              timeText: vid.publishedTimeText?.simpleText || vid.dateText?.simpleText || 'Started recently',
+              thumbnail: getHighQualityThumbnail(vid.thumbnail, vid.videoId), 
+              avatar: finalAvatar
+            };
+        });
 
         setVideos(isNewSearch ? formattedVideos : [...videos, ...formattedVideos]);
       }
@@ -215,8 +232,7 @@ export default function LiveScreen() {
       </TouchableOpacity>
 
       <View style={styles.videoInfo}>
-        {/* এখানে ChannelScreen এর পরিবর্তে Channel এবং videoLink যুক্ত করা হয়েছে */}
-        <TouchableOpacity onPress={() => navigation.navigate('Channel', { channelId: item.channelId, channelName: item.channel, avatar: item.avatar, videoId: item.id, videoLink: `https://www.youtube.com/watch?v=${item.id}` })}>
+        <TouchableOpacity onPress={() => navigateToChannel(item)}>
           <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
         </TouchableOpacity>
         
@@ -224,8 +240,7 @@ export default function LiveScreen() {
           <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
             <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
           </TouchableOpacity>
-          {/* এখানেও ChannelScreen এর পরিবর্তে Channel এবং videoLink যুক্ত করা হয়েছে */}
-          <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('Channel', { channelId: item.channelId, channelName: item.channel, avatar: item.avatar, videoId: item.id, videoLink: `https://www.youtube.com/watch?v=${item.id}` })}>
+          <TouchableOpacity activeOpacity={0.8} onPress={() => navigateToChannel(item)}>
             <Text style={styles.meta}>{item.channel} • {item.views} • {item.timeText}</Text>
           </TouchableOpacity>
         </View>
@@ -300,7 +315,7 @@ const styles = StyleSheet.create({
   // Top Channels Styles
   topChannelsContainer: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#222', marginBottom: 10 },
   topChannelItem: { alignItems: 'center', marginHorizontal: 8, width: 70 },
-  topChannelLogo: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#333', borderWidth: 1, borderColor: '#444' },
+  topChannelLogo: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#333', borderWidth: 1, borderColor: '#444', resizeMode: 'cover' },
   topChannelName: { color: '#FFF', fontSize: 11, marginTop: 6, textAlign: 'center' },
   
   // Video Card Styles
@@ -310,7 +325,7 @@ const styles = StyleSheet.create({
   liveBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: '#FF0000', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
   liveBadgeText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
   videoInfo: { flexDirection: 'row', padding: 12, alignItems: 'flex-start' },
-  channelAvatar: { width: 38, height: 38, borderRadius: 19, marginRight: 12, backgroundColor: '#333' },
+  channelAvatar: { width: 38, height: 38, borderRadius: 19, marginRight: 12, backgroundColor: '#333', resizeMode: 'cover' },
   textContainer: { flex: 1, paddingRight: 10 },
   title: { color: '#FFF', fontSize: 14, fontWeight: '500', marginBottom: 4 },
   meta: { color: '#AAA', fontSize: 12 }
