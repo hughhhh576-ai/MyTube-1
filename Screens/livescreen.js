@@ -311,7 +311,7 @@ const styles = StyleSheet.create({
     flex: 1, 
     backgroundColor: '#0F0F0F',
     // আপনার নির্দেশনা অনুযায়ী: স্ক্রিনের ৩২ ভাগের ১ ভাগ ওপরের টাইমের জন্য বরাদ্দ করা হলো
-    paddingTop: height / 35 
+    paddingTop: height / 45 
   },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#222', width: '100%', backgroundColor: '#0F0F0F' },
   logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
