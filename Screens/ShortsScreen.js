@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Share, Dimensions, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Share, Platform, StatusBar } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -11,9 +11,6 @@ const UAS = {
   normal: "Mozilla/5.0 (Linux; Android 10; SM-A515F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Mobile Safari/537.36",
   high: "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro Build/UD1A.230803.041) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.43 Mobile Safari/537.36"
 };
-
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-const BACK_BUTTON_HEIGHT = SCREEN_HEIGHT / 16; 
 
 export default function ShortsScreen({ initialVideoId, route }) {
   const navigation = useNavigation();
@@ -37,8 +34,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
   const shortsWebViewRef = useRef(null);
 
   const targetUri = initialVideoId || route?.params?.videoId ? `https://m.youtube.com/shorts/${initialVideoId || route?.params?.videoId}` : "https://m.youtube.com/shorts";
-
-  const showBackBtn = route?.params && route?.params?.videoId !== undefined;
 
   useFocusEffect(
     useCallback(() => {
@@ -241,7 +236,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
   return (
     <View style={styles.container}>
       <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" />
-      
+
       <View style={styles.header}>
         <View style={styles.logoContainer}>
            <Ionicons name="logo-youtube" size={28} color="#FF0000" />
@@ -299,16 +294,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
         </View>
       )}
 
-      {showBackBtn && (
-        <TouchableOpacity 
-          style={[styles.bottomBackBtn, { height: BACK_BUTTON_HEIGHT }]} 
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="arrow-back" size={28} color="#FFF" />
-        </TouchableOpacity>
-      )}
-
     </View>
   );
 }
@@ -341,14 +326,5 @@ const styles = StyleSheet.create({
   nativeSubText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
   nativeSubbedText: { color: '#AAA' },
   nativeShareBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 25, marginLeft: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  nativeShareText: { color: '#FFF', fontWeight: 'bold', fontSize: 13, marginLeft: 6 },
-  
-  bottomBackBtn: {
-    backgroundColor: '#0F0F0F',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#222',
-    width: '100%'
-  }
+  nativeShareText: { color: '#FFF', fontWeight: 'bold', fontSize: 13, marginLeft: 6 }
 });
