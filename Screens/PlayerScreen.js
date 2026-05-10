@@ -329,8 +329,7 @@ export default function PlayerScreen({ route, navigation }) {
             
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }}>
-                // <Text style={styles.modalTitle} numberOfLines={1}>ডাউনলোড</Text>
-                // <Text style={styles.modalSubtitle}>ছোট থেকে বড়</Text>
+                Text>
               </View>
               <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setShowDownloadModal(false)}>
                 <Ionicons name="close" size={20} color="#FFF" />
