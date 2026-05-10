@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, Image, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback } from 'react-native';
 import { Video, Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
@@ -32,13 +32,14 @@ export default function GlobalPlayer() {
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
-  const [audioStreamUrl, setAudioStreamUrl] = useState(null); // [NEW] অডিও ইউআরএল আলাদা রাখার জন্য
+  const [audioStreamUrl, setAudioStreamUrl] = useState(null);
   const [streamMode, setStreamMode] = useState('combined'); 
   const [isPlaying, setIsPlaying] = useState(true);
-  const [isAudioMode, setIsAudioMode] = useState(false); // [NEW] অডিও মোড ট্র্যাকার
+  const [isAudioMode, setIsAudioMode] = useState(false);
   const [videoKey, setVideoKey] = useState(Date.now().toString());
 
-  const [fallbackData, setFallbackData] = useState(null); // [NEW] কোয়ালিটি ফলব্যাক অ্যালার্টের ডাটা
+  // পারমিশন অ্যালার্টের জন্য স্টেট
+  const [fallbackData, setFallbackData] = useState(null); 
 
   const [showSpeedModal, setShowSpeedModal] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
@@ -85,7 +86,7 @@ export default function GlobalPlayer() {
     } catch (e) {}
   };
 
-  // [NEW] স্ট্রিম ডাটা অ্যাপ্লাই করার সেপারেট ফাংশন
+  // ইউজারের অনুমতি পাওয়ার পর ভিডিও প্লে করার ফাংশন
   const applyStreamData = async (json) => {
     setStreamMode(json.streamType || 'combined');
     setStreamUrl(json.url);
@@ -116,15 +117,15 @@ export default function GlobalPlayer() {
       if (json.success && json.url) {
           const resQ = parseInt(json.quality) || 720;
 
-          // [NEW] রুল ১: যদি রিকোয়েস্ট করা কোয়ালিটি না পাওয়া যায়, তবে অ্যালার্ট দেখাবে
-          if (!isAuto && reqQ > resQ) {
+          // 🚨 কড়া নিয়ম: রিকোয়েস্ট করা কোয়ালিটি না মিললে পারমিশন চাইবে!
+          if (!isAuto && reqQ !== resQ) {
               setFallbackData({
                   reqQ: reqQ,
                   resQ: resQ,
                   data: json,
-                  message: `Requested ${reqQ}p is not available for this video.\nPlay highest available quality (${resQ}p) instead?`
+                  message: `Requested ${reqQ}p is not available.\nPlay highest available quality (${resQ}p) instead?`
               });
-              return; 
+              return; // এখানে ভিডিও প্লে না করে ইউজারের অনুমতির জন্য থেমে যাবে
           }
 
           // যদি কোয়ালিটি মিলে যায়, তবে সরাসরি প্লে হবে
@@ -133,7 +134,6 @@ export default function GlobalPlayer() {
     } catch(e) { console.log("Connection Error"); }
   };
 
-  // [UPDATED] ভিডিও প্লেব্যাকের সাথে অডিও সিঙ্ক
   const handlePlaybackStatusUpdate = async (status) => {
     if (!isAudioMode && status.isLoaded) {
         setCurrentTime(status.positionMillis);
@@ -154,7 +154,6 @@ export default function GlobalPlayer() {
     }
   };
 
-  // [NEW] অডিও মোডের সময় টাইম আপডেট করার লজিক
   useEffect(() => {
       syncAudioRef.current.setOnPlaybackStatusUpdate((status) => {
           if (isAudioMode && status.isLoaded) {
@@ -164,13 +163,12 @@ export default function GlobalPlayer() {
       });
   }, [isAudioMode]);
 
-  // [NEW] অডিও মোড টগল (ভিডিও রিমুভ করে অডিও প্লে করা)
+  // অডিও মোড টগল লজিক
   const toggleAudioMode = async () => {
       const newMode = !isAudioMode;
       setIsAudioMode(newMode);
 
       if (newMode) {
-          // অডিও মোড অন: ভিডিও পজ করে শুধু অডিও প্লে করা হবে
           setBackgroundAudio(true);
           if (videoRef.current) {
               const vStatus = await videoRef.current.getStatusAsync();
@@ -179,7 +177,6 @@ export default function GlobalPlayer() {
           }
           if (isPlaying && audioStreamUrl) await syncAudioRef.current.playAsync().catch(()=>{});
       } else {
-          // অডিও মোড অফ: অডিও পজ করে ভিডিও প্লে করা হবে
           setBackgroundAudio(false);
           const aStatus = await syncAudioRef.current.getStatusAsync();
           if (aStatus.isLoaded) {
@@ -216,7 +213,7 @@ export default function GlobalPlayer() {
       setPlayerState('full'); 
       setStreamUrl(null);
       setAudioStreamUrl(null);
-      setFallbackData(null); // [NEW] নতুন ভিডিওর সময় ফলব্যাক ক্লিয়ার
+      setFallbackData(null); 
       setIsAudioMode(false);
       setBackgroundAudio(false);
       setVideoKey(Date.now().toString());
@@ -334,7 +331,6 @@ export default function GlobalPlayer() {
      <Animated.View style={[isFull ? styles.fullContainer : styles.miniContainer, !isFull && { transform: pan.getTranslateTransform() }]} {...(isFull ? {} : panResponder.panHandlers)}>
         <View style={styles.videoWrapper}>
             
-            {/* [NEW] অডিও মোড স্ক্রিন (ভিডিও রিমুভ করে দিলে এটি দেখাবে) */}
             {isAudioMode && isFull && !fallbackData && (
                 <View style={styles.audioModeOverlay}>
                     <Ionicons name="headset" size={80} color="#FF0000" />
@@ -342,7 +338,6 @@ export default function GlobalPlayer() {
                 </View>
             )}
 
-            {/* ভিডিও কম্পোনেন্ট (অডিও মোডে থাকলে source null হয়ে যাবে) */}
             {streamUrl && !fallbackData && (
                 <Video 
                     key={videoKey}
@@ -358,7 +353,7 @@ export default function GlobalPlayer() {
                 />
             )}
 
-            {/* [NEW] কোয়ালিটি ফলব্যাক অ্যালার্ট */}
+            {/* 🚨 ইউজারের অনুমতির অ্যালার্ট স্ক্রিন 🚨 */}
             {fallbackData && isFull && (
                 <View style={styles.fallbackOverlay}>
                     <Ionicons name="alert-circle" size={60} color="#FFD700" />
@@ -366,7 +361,7 @@ export default function GlobalPlayer() {
                     <Text style={styles.fallbackText}>{fallbackData.message}</Text>
                     <View style={styles.fallbackBtnRow}>
                         <TouchableOpacity style={styles.fallbackBtn} onPress={() => {
-                            applyStreamData(fallbackData.data);
+                            applyStreamData(fallbackData.data); // অনুমতি দিলে প্লে হবে
                             setFallbackData(null);
                         }}>
                             <Text style={styles.fallbackBtnText}>OK, Play {fallbackData.resQ}p</Text>
@@ -378,7 +373,6 @@ export default function GlobalPlayer() {
                 </View>
             )}
 
-            {/* ডাবল ট্যাপ ডিটেকশন */}
             {isFull && !fallbackData && (
                 <View style={styles.doubleTapOverlay}>
                     <TouchableWithoutFeedback onPress={() => handleVideoTap('left')}>
@@ -390,7 +384,6 @@ export default function GlobalPlayer() {
                 </View>
             )}
 
-            {/* কন্ট্রোল বার */}
             {isFull && showControls && !fallbackData && (
                 <>
                     <TouchableOpacity style={styles.backBtn} onPress={() => { 
@@ -402,7 +395,6 @@ export default function GlobalPlayer() {
                     </TouchableOpacity>
 
                     <View style={styles.topRightControls}>
-                        {/* [NEW] অডিও মোড অন/অফ বাটন */}
                         <TouchableOpacity onPress={toggleAudioMode} style={[styles.iconBtn, isAudioMode && {backgroundColor: 'rgba(255,0,0,0.3)', borderRadius: 20}]}>
                             <Ionicons name={isAudioMode ? "headset" : "headset-outline"} size={24} color={isAudioMode ? "#FF0000" : "#FFF"} />
                         </TouchableOpacity>
@@ -481,22 +473,19 @@ export default function GlobalPlayer() {
 
 const styles = StyleSheet.create({
   fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
-
   miniContainer: { 
       position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, 
       backgroundColor: '#000', zIndex: 9999, borderRadius: 12, overflow: 'hidden', 
       elevation: 20, shadowColor: '#00FF00', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 10,
       borderWidth: 1.5, borderColor: 'rgba(0, 255, 0, 0.5)'
   },
-
   videoWrapper: { flex: 1, position: 'relative', justifyContent: 'center' },
   video: { width: '100%', height: '100%' },
 
-  // [NEW] অডিও মোড স্ক্রিন স্টাইল
   audioModeOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center', zIndex: 1 },
   audioModeText: { color: '#FFF', fontSize: 18, marginTop: 10, fontWeight: 'bold' },
 
-  // [NEW] ফলব্যাক অ্যালার্ট স্টাইল
+  // 🚨 ফলব্যাক অ্যালার্টের স্টাইল
   fallbackOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', zIndex: 200 },
   fallbackTitle: { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginTop: 10 },
   fallbackText: { color: '#CCC', fontSize: 15, marginVertical: 15, textAlign: 'center', paddingHorizontal: 20 },
@@ -506,21 +495,15 @@ const styles = StyleSheet.create({
 
   doubleTapOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', zIndex: 10 },
   halfScreen: { flex: 1, height: '100%', backgroundColor: 'transparent' },
-
   backBtn: { position: 'absolute', top: 10, left: 10, zIndex: 100, padding: 5 },
-
   topRightControls: { position: 'absolute', top: 10, right: 10, zIndex: 100, flexDirection: 'row', alignItems: 'center' },
   iconBtn: { marginLeft: 15, padding: 5, backgroundColor: 'transparent' },
-
   centerPlayPauseContainer: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center', alignItems: 'center', zIndex: 50 },
-
   customControlsContainer: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 50, backgroundColor: 'transparent' },
   timeText: { color: '#FFF', fontSize: 13, marginHorizontal: 5, fontWeight: 'bold', textShadowColor: 'rgba(0, 0, 0, 0.75)', textShadowOffset: {width: -1, height: 1}, textShadowRadius: 5 },
   slider: { flex: 1, height: 40, marginHorizontal: 5 },
-
   miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 },
   miniCloseBtn: { position: 'absolute', top: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 15 },
-
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
   settingsMenu: { width: 220, backgroundColor: '#1A1A1A', borderRadius: 15, padding: 15, elevation: 10 },
   modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 10, textAlign: 'center', borderBottomWidth: 1, borderBottomColor: '#333', paddingBottom: 10 },
