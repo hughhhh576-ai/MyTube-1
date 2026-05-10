@@ -20,7 +20,7 @@ export default function PlayerScreen({ route, navigation }) {
 
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
-  // 2D Download Modal States
+  // 2D Side-Sheet Modal States
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [downloadStep, setDownloadStep] = useState('fetching'); 
   const [downloadLinks, setDownloadLinks] = useState([]);
@@ -194,12 +194,13 @@ export default function PlayerScreen({ route, navigation }) {
     } catch (e) {} finally { setIsLoadingMore(false); }
   };
 
+  // লিংকগুলোকে ছোট থেকে বড় আকারে সাজানোর লজিক
   const getSortedLinks = () => {
       if(!downloadLinks) return [];
       return [...downloadLinks].sort((a, b) => {
           const valA = parseInt(a.quality.replace(/[^0-9]/g, '')) || 0;
           const valB = parseInt(b.quality.replace(/[^0-9]/g, '')) || 0;
-          return valA - valB; // ছোট থেকে বড় 
+          return valA - valB; // Ascending order
       });
   };
 
@@ -310,30 +311,40 @@ export default function PlayerScreen({ route, navigation }) {
           />
       )}
 
-      {/* 2D Premium Grid Download Modal */}
+      {/* 2D Half-Screen (50% Width) Right-Aligned Modal */}
       <Modal visible={showDownloadModal} transparent animationType="slide" onRequestClose={() => setShowDownloadModal(false)}>
         <View style={styles.modalOverlay}>
+          
+          {/* বামদিকের খালি অংশ - এখানে ক্লিক করলে মডাল কেটে যাবে */}
+          <TouchableOpacity 
+              style={styles.modalBackdrop} 
+              activeOpacity={1} 
+              onPress={() => setShowDownloadModal(false)} 
+          />
+          
+          {/* ডানদিকের অর্ধেক স্কিনের প্যানেল */}
           <View style={styles.modalContent}>
             
             <View style={styles.modalDragIndicator} />
             
             <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>ডাউনলোড অপশন</Text>
-                <Text style={styles.modalSubtitle}>ছোট থেকে বড় সাইজ অনুযায়ী সাজানো</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle} numberOfLines={1}>ডাউনলোড</Text>
+                <Text style={styles.modalSubtitle}>ছোট থেকে বড়</Text>
               </View>
               <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setShowDownloadModal(false)}>
-                <Ionicons name="close" size={24} color="#FFF" />
+                <Ionicons name="close" size={20} color="#FFF" />
               </TouchableOpacity>
             </View>
 
+            {/* Video/Audio Tabs */}
             <View style={styles.tabContainer}>
                 <TouchableOpacity 
                     style={[styles.tabButton, downloadType === 'video' && styles.activeTabButton]} 
                     onPress={() => changeDownloadType('video')}
                     activeOpacity={0.8}
                 >
-                    <Ionicons name="videocam" size={20} color={downloadType === 'video' ? '#FFF' : '#888'} />
+                    <Ionicons name="videocam" size={16} color={downloadType === 'video' ? '#FFF' : '#888'} />
                     <Text style={[styles.tabText, downloadType === 'video' && styles.activeTabText]}>Video</Text>
                 </TouchableOpacity>
                 
@@ -342,26 +353,33 @@ export default function PlayerScreen({ route, navigation }) {
                     onPress={() => changeDownloadType('audio')}
                     activeOpacity={0.8}
                 >
-                    <Ionicons name="musical-notes" size={20} color={downloadType === 'audio' ? '#FFF' : '#888'} />
+                    <Ionicons name="musical-notes" size={16} color={downloadType === 'audio' ? '#FFF' : '#888'} />
                     <Text style={[styles.tabText, downloadType === 'audio' && styles.activeTabText]}>Audio</Text>
                 </TouchableOpacity>
             </View>
             
-            {/* Grid Content */}
+            {/* List Content */}
             {downloadStep === 'fetching' ? (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#00BFA5" />
                 <Text style={styles.loadingText}>লিঙ্ক তৈরি হচ্ছে...</Text>
               </View>
             ) : (
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.qualityGridContainer}>
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.qualityListContainer}>
                 {getSortedLinks().map((item, index) => (
-                  <TouchableOpacity key={index} style={styles.gridCard} activeOpacity={0.7} onPress={() => handleDownloadExecute(item)}>
-                    <View style={styles.gridIconBg}>
-                        <Ionicons name={downloadType === 'audio' ? "headset" : "videocam"} size={26} color="#00BFA5" />
+                  <TouchableOpacity key={index} style={styles.qualityCard} activeOpacity={0.7} onPress={() => handleDownloadExecute(item)}>
+                    <View style={styles.qualityInfoLeft}>
+                      <View style={styles.qualityIconBg}>
+                          <Ionicons name={downloadType === 'audio' ? "headset" : "videocam"} size={18} color="#00BFA5" />
+                      </View>
+                      <View style={{ marginLeft: 10 }}>
+                        <Text style={styles.qualityText}>{item.quality}</Text>
+                        <Text style={styles.qualitySubText}>{item.size || (downloadType === 'video' ? 'MP4' : 'MP3')}</Text>
+                      </View>
                     </View>
-                    <Text style={styles.gridQualityText}>{item.quality}</Text>
-                    <Text style={styles.gridSizeText}>{item.size || (downloadType === 'video' ? 'MP4 Format' : 'MP3')}</Text>
+                    <View style={styles.downloadIconBtn}>
+                        <Ionicons name="download-outline" size={18} color="#00BFA5" />
+                    </View>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -427,62 +445,59 @@ const styles = StyleSheet.create({
     recViewsInfo: { color: '#888', fontSize: 11, marginTop: 2 },
     
     // ==========================================
-    // Grid Download Modal Styles (Half Width)
+    // 2D Half-Screen Modal Styles
     // ==========================================
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-    modalContent: { 
-        backgroundColor: '#1E1E1E', 
-        borderTopLeftRadius: 24, 
-        borderTopRightRadius: 24, 
-        paddingHorizontal: 20, 
-        paddingTop: 12, 
-        paddingBottom: Platform.OS === 'ios' ? 40 : 25, 
-        maxHeight: height * 0.75,
-        minHeight: 400
+    modalOverlay: { 
+        flex: 1, 
+        flexDirection: 'row', 
+        justifyContent: 'flex-end', // ডানদিকে অ্যালাইন করা
+        alignItems: 'flex-end'      // নিচে অ্যালাইন করা
     },
-    modalDragIndicator: { width: 40, height: 5, backgroundColor: '#444', borderRadius: 3, alignSelf: 'center', marginBottom: 20 },
-    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-    modalTitle: { color: '#FFF', fontSize: 20, fontWeight: 'bold' },
-    modalSubtitle: { color: '#888', fontSize: 12, marginTop: 4 },
-    modalCloseBtn: { padding: 8, backgroundColor: '#2A2A2A', borderRadius: 20 },
+    modalBackdrop: { 
+        ...StyleSheet.absoluteFillObject, 
+        backgroundColor: 'rgba(0,0,0,0.4)' // ট্রান্সপারেন্ট ব্ল্যাক, পেছনের অ্যাপ দেখা যাবে
+    },
+    modalContent: { 
+        width: '50%', // স্ক্রিনের ঠিক অর্ধেক সাইজ
+        backgroundColor: '#1E1E1E', 
+        borderTopLeftRadius: 25, 
+        borderTopRightRadius: 0, // ডানদিকে কোনো রাউন্ড থাকবে না, কারণ এটি সাইডে লাগানো
+        paddingHorizontal: 12, 
+        paddingTop: 10, 
+        paddingBottom: Platform.OS === 'ios' ? 40 : 20, 
+        maxHeight: height * 0.75,
+        minHeight: 350,
+        elevation: 15,
+        shadowColor: '#000',
+        shadowOffset: { width: -5, height: 0 },
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+        zIndex: 10
+    },
+    modalDragIndicator: { width: 35, height: 4, backgroundColor: '#444', borderRadius: 2, alignSelf: 'center', marginBottom: 15 },
+    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
+    modalTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold' }, // সাইজ কমানো হয়েছে
+    modalSubtitle: { color: '#888', fontSize: 10, marginTop: 3 }, // সাইজ কমানো হয়েছে
+    modalCloseBtn: { padding: 6, backgroundColor: '#2A2A2A', borderRadius: 15, marginLeft: 5 },
     
-    tabContainer: { flexDirection: 'row', backgroundColor: '#111', borderRadius: 12, padding: 4, marginBottom: 20 },
-    tabButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 8 },
+    tabContainer: { flexDirection: 'row', backgroundColor: '#111', borderRadius: 10, padding: 3, marginBottom: 15 },
+    tabButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8 },
     activeTabButton: { backgroundColor: '#2A2A2A' },
-    tabText: { color: '#888', fontSize: 15, fontWeight: 'bold', marginLeft: 8 },
+    tabText: { color: '#888', fontSize: 12, fontWeight: 'bold', marginLeft: 6 }, // সাইজ কমানো হয়েছে
     activeTabText: { color: '#FFF' },
 
     loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-    loadingText: { color: '#AAA', marginTop: 15, fontSize: 15 },
+    loadingText: { color: '#AAA', marginTop: 12, fontSize: 13 },
     
-    // Grid Layout Styles
-    qualityGridContainer: { 
-        flexDirection: 'row', 
-        flexWrap: 'wrap', 
-        justifyContent: 'space-between', 
-        paddingBottom: 20 
+    qualityListContainer: { paddingBottom: 10 },
+    qualityCard: { 
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', 
+        backgroundColor: '#282828', padding: 10, borderRadius: 12, marginBottom: 10, 
+        borderWidth: 1, borderColor: '#383838' 
     },
-    gridCard: {
-        width: '48%', // স্ক্রিনের অর্ধেক প্রস্থ (২% স্পেসিং এর জন্য)
-        backgroundColor: '#282828',
-        paddingVertical: 18,
-        paddingHorizontal: 10,
-        borderRadius: 16,
-        marginBottom: 15,
-        borderWidth: 1,
-        borderColor: '#383838',
-        alignItems: 'center',
-        justifyContent: 'center'
-    },
-    gridIconBg: {
-        backgroundColor: 'rgba(0, 191, 165, 0.1)',
-        width: 50,
-        height: 50,
-        borderRadius: 25,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 12
-    },
-    gridQualityText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-    gridSizeText: { color: '#888', fontSize: 12, marginTop: 4, textAlign: 'center' }
+    qualityInfoLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+    qualityIconBg: { backgroundColor: 'rgba(0, 191, 165, 0.1)', padding: 8, borderRadius: 10 },
+    qualityText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' }, // সাইজ কমানো হয়েছে
+    qualitySubText: { color: '#888', fontSize: 10, marginTop: 2 }, // সাইজ কমানো হয়েছে
+    downloadIconBtn: { padding: 5 }
 });
