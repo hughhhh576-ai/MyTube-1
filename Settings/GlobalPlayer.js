@@ -17,15 +17,17 @@ const MY_API_SERVER = "http://127.0.0.1:10000";
 
 export default function GlobalPlayer() {
   const navigation = useNavigation();
-  const videoViewRef = useRef(null); // ফুলস্ক্রিন করার জন্য Ref
+  const videoViewRef = useRef(null); 
   const syncAudioRef = useRef(new Audio.Sound()); 
   const currentVideoIdRef = useRef(null);
   const fetchIdRef = useRef(0);
   
-  // ডাবল ট্যাপের জন্য Ref
+  // ডাবল ট্যাপ এবং স্লাইডারের জন্য Ref
   const lastTapRef = useRef({ time: 0, side: '' });
   const tapTimeoutRef = useRef(null);
+  const isSlidingRef = useRef(false); // দাগটি ধরে টানার সময় ট্র্যাক করার জন্য
 
+  // Player States
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
@@ -33,12 +35,15 @@ export default function GlobalPlayer() {
   const [isAudioMode, setIsAudioMode] = useState(false);
   const [fallbackData, setFallbackData] = useState(null);
 
+  // Time & Duration States (স্লাইডার সচল রাখার জন্য)
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(1);
+
   const [showControls, setShowControls] = useState(true);
   const controlsTimeoutRef = useRef(null);
   
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
-  // --- [নতুন প্লেয়ার ইঞ্জিন সেটআপ] ---
   const player = useVideoPlayer(streamUrl, (p) => {
     p.loop = false;
     p.play();
@@ -50,29 +55,40 @@ export default function GlobalPlayer() {
     controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
   };
 
-  // --- [আপডেট ৩: কড়া নিয়মে অন্য স্ক্রিনে গেলে অটো মিনিমাইজ] ---
+  // অন্য স্ক্রিনে গেলে অটো মিনিমাইজ
   useEffect(() => {
     const unsubscribe = navigation.addListener('state', (e) => {
       if (!e.data.state) return;
       const routes = e.data.state.routes;
       const currentRoute = routes[routes.length - 1].name;
       
-      // 'Player' বা 'PlayerScreen' ছাড়া অন্য কোথাও গেলে মিনিমাইজ হয়ে যাবে
-      if (currentRoute !== 'Player' && currentRoute !== 'PlayerScreen' && playerState === 'full') {
-        setPlayerState('mini');
+      if (currentRoute !== 'Player' && currentRoute !== 'PlayerScreen') {
+          setPlayerState((prev) => {
+              if (prev === 'full' || prev === 'center') return 'mini';
+              return prev;
+          });
       }
     });
-    
-    // ম্যানুয়ালি ইভেন্ট দিয়েও মিনিমাইজ করানো যাবে
-    const minSub = DeviceEventEmitter.addListener('forceMinimizeGlobalPlayer', () => setPlayerState('mini'));
+    return unsubscribe;
+  }, [navigation]);
 
-    return () => {
-        unsubscribe();
-        minSub.remove();
+  useEffect(() => {
+    const backAction = () => {
+      if (playerState === 'center') {
+        setPlayerState('full');
+        return true;
+      } else if (playerState === 'full') {
+        setPlayerState('mini');
+        if (navigation.canGoBack()) navigation.goBack();
+        else navigation.navigate('Home');
+        return true;
+      }
+      return false;
     };
-  }, [navigation, playerState]);
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [playerState, navigation]);
 
-  // অডিও এবং ভিডিও সিঙ্কিং লজিক
   const syncAudioWithVideo = async (targetPositionSeconds) => {
       try {
           const status = await syncAudioRef.current.getStatusAsync();
@@ -80,7 +96,7 @@ export default function GlobalPlayer() {
               await syncAudioRef.current.setPositionAsync(targetPositionSeconds * 1000);
               if (player.playing) await syncAudioRef.current.playAsync();
           }
-      } catch (e) { console.log("Sync Error:", e); }
+      } catch (e) {}
   };
 
   useEffect(() => {
@@ -92,12 +108,12 @@ export default function GlobalPlayer() {
       setStreamUrl(null);
       setFallbackData(null);
       setIsAudioMode(false);
+      setCurrentTime(0);
       triggerControls();
 
       const targetQuality = global.appSettings?.normalVideo || '720p';
       fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
     });
-
     return () => playSub.remove();
   }, []);
 
@@ -123,7 +139,7 @@ export default function GlobalPlayer() {
           }
           startPlayback(json);
       }
-    } catch(e) { console.log("Fetch Error"); }
+    } catch(e) {}
   };
 
   const startPlayback = async (json) => {
@@ -135,32 +151,29 @@ export default function GlobalPlayer() {
     }
   };
 
-  // স্কিপিং লজিক
+  // ডাবল ট্যাপ করে স্কিপ করার লজিক
   const handleSkip = async (amount) => {
       let newTime = player.currentTime + amount;
       if (newTime < 0) newTime = 0;
       if (newTime > player.duration) newTime = player.duration;
       
       player.currentTime = newTime; 
+      setCurrentTime(newTime);
       if (streamMode === 'separate') await syncAudioWithVideo(newTime); 
       triggerControls();
   };
 
-  // --- [আপডেট ১: নিখুঁত ডাবল ট্যাপ এবং সিঙ্গেল ট্যাপ লজিক] ---
   const handleTap = (side) => {
       const now = Date.now();
-      const DOUBLE_TAP_DELAY = 300; // ৩০০ মিলি-সেকেন্ডের মধ্যে ২ বার চাপলে ডাবল ট্যাপ
+      const DOUBLE_TAP_DELAY = 300; 
       
       if (lastTapRef.current.side === side && (now - lastTapRef.current.time) < DOUBLE_TAP_DELAY) {
-          // ডাবল ট্যাপ হয়েছে (১০ সেকেন্ড স্কিপ)
           clearTimeout(tapTimeoutRef.current);
           lastTapRef.current = { time: 0, side: '' }; 
-          handleSkip(side === 'right' ? 10 : -10);
+          handleSkip(side === 'right' ? 10 : -10); // ১০ সেকেন্ড স্কিপ
       } else {
-          // সিঙ্গেল ট্যাপ হিসেবে রেকর্ড করা হলো
           lastTapRef.current = { time: now, side };
           tapTimeoutRef.current = setTimeout(() => {
-              // যদি ডাবল ট্যাপ না হয়, তবেই কন্ট্রোল দেখাবে/লুকাবে
               setShowControls(prev => !prev);
               lastTapRef.current = { time: 0, side: '' };
               if (!showControls) triggerControls();
@@ -168,21 +181,30 @@ export default function GlobalPlayer() {
       }
   };
 
-  // --- [আপডেট ২: সোয়াইপ ডাউন করে মিনিমাইজ করার লজিক] ---
-  const fullScreenPanResponder = useRef(PanResponder.create({
+  // থিয়েটার মোড সোয়াইপ লজিক
+  const verticalPanResponder = useRef(PanResponder.create({
       onMoveShouldSetPanResponder: (evt, gestureState) => {
-          // যদি নিচের দিকে জোরে সোয়াইপ করে, তবেই এটি কাজ করবে
-          return gestureState.dy > 30 && Math.abs(gestureState.vy) > 0.5;
+          return Math.abs(gestureState.dy) > 30 && Math.abs(gestureState.vy) > 0.5;
       },
       onPanResponderRelease: (evt, gestureState) => {
           if (gestureState.dy > 50) {
-              setPlayerState('mini');
-              if (navigation.canGoBack()) navigation.goBack();
+              setPlayerState(prev => {
+                  if (prev === 'full') return 'center'; 
+                  if (prev === 'center') {
+                      if (navigation.canGoBack()) navigation.goBack();
+                      return 'mini'; 
+                  }
+                  return prev;
+              });
+          } else if (gestureState.dy < -50) {
+              setPlayerState(prev => {
+                  if (prev === 'center') return 'full'; 
+                  return prev;
+              });
           }
       }
   })).current;
 
-  // মিনি প্লেয়ার ঘোরানোর লজিক
   const miniPanResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => false, 
     onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 10 || Math.abs(gestureState.dy) > 10,
@@ -197,9 +219,16 @@ export default function GlobalPlayer() {
     }
   })).current;
 
-  // ব্যাকগ্রাউন্ড সিঙ্ক মনিটর
+  // স্লাইডার এবং অডিও সিঙ্কিং মনিটর (সুপার স্মুথ আপডেট)
   useEffect(() => {
     const interval = setInterval(async () => {
+        // ১. ভিডিওর সময় আপডেট করা (যদি দাগ ধরে টানা না হয়)
+        if (!isSlidingRef.current && player) {
+            setCurrentTime(player.currentTime);
+            setDuration(player.duration > 0 ? player.duration : 1);
+        }
+
+        // ২. অডিও সিঙ্কিং চেক করা
         if (streamMode === 'separate' && player.playing) {
             const audioStatus = await syncAudioRef.current.getStatusAsync();
             if (audioStatus.isLoaded) {
@@ -212,30 +241,43 @@ export default function GlobalPlayer() {
         }
     }, 1000);
     return () => clearInterval(interval);
-  }, [player.playing, streamMode]);
+  }, [player, streamMode]);
+
+  // টাইম ফরম্যাটিং হেল্পার
+  const formatTime = (timeInSeconds) => {
+      if (isNaN(timeInSeconds)) return "00:00";
+      const m = Math.floor(timeInSeconds / 60);
+      const s = Math.floor(timeInSeconds % 60);
+      return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   if (playerState === 'hidden') return null;
-  const isFull = playerState === 'full';
+  const isInteractiveFull = playerState === 'full' || playerState === 'center';
 
   return (
     <Animated.View 
-        style={[isFull ? styles.fullContainer : styles.miniContainer, !isFull && { transform: pan.getTranslateTransform() }]} 
-        {...(isFull ? fullScreenPanResponder.panHandlers : miniPanResponder.panHandlers)}
+        style={[
+            playerState === 'full' ? styles.fullContainer : 
+            playerState === 'center' ? styles.centerContainer : 
+            styles.miniContainer, 
+            playerState === 'mini' && { transform: pan.getTranslateTransform() }
+        ]} 
+        {...(isInteractiveFull ? verticalPanResponder.panHandlers : miniPanResponder.panHandlers)}
     >
-      <View style={styles.videoWrapper}>
+      <View style={playerState === 'center' ? styles.videoWrapperCentered : styles.videoWrapper}>
         
         {streamUrl && !fallbackData && !isAudioMode && (
           <VideoView 
-            ref={videoViewRef} // ফুলস্ক্রিন অ্যাক্সেস করার জন্য
+            ref={videoViewRef} 
             player={player} 
             style={styles.video} 
             contentFit="contain"
-            allowsFullscreen // নেটিভ ফুলস্ক্রিন সাপোর্ট
+            allowsFullscreen 
           />
         )}
 
         {/* ডাবল ট্যাপ এবং সিঙ্গেল ট্যাপ ডিটেকশন লেয়ার */}
-        {isFull && !fallbackData && (
+        {isInteractiveFull && !fallbackData && (
             <View style={styles.tapOverlay}>
                 <TouchableWithoutFeedback onPress={() => handleTap('left')}><View style={styles.tapHalf} /></TouchableWithoutFeedback>
                 <TouchableWithoutFeedback onPress={() => handleTap('right')}><View style={styles.tapHalf} /></TouchableWithoutFeedback>
@@ -243,11 +285,15 @@ export default function GlobalPlayer() {
         )}
 
         {/* কন্ট্রোল বার */}
-        {isFull && showControls && !fallbackData && (
+        {isInteractiveFull && showControls && !fallbackData && (
           <View style={styles.controls} pointerEvents="box-none">
              <TouchableOpacity style={styles.backBtn} onPress={() => {
-                 setPlayerState('mini');
-                 if (navigation.canGoBack()) navigation.goBack();
+                 if(playerState === 'center') {
+                     setPlayerState('full');
+                 } else {
+                     setPlayerState('mini');
+                     if (navigation.canGoBack()) navigation.goBack();
+                 }
              }}>
                 <Ionicons name="chevron-down" size={35} color="#FFF" />
              </TouchableOpacity>
@@ -259,22 +305,31 @@ export default function GlobalPlayer() {
              </View>
 
              <View style={styles.bottomBar}>
-                <Text style={styles.timeText}>{Math.floor(player.currentTime / 60)}:{Math.floor(player.currentTime % 60).toString().padStart(2, '0')}</Text>
+                <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+                
+                {/* 🚨 আপডেট: নিখুঁত প্রগ্রেস বার (দাগ টানা) 🚨 */}
                 <Slider 
                   style={{flex: 1, height: 40, marginHorizontal: 10}}
                   minimumValue={0}
-                  maximumValue={player.duration}
-                  value={player.currentTime}
+                  maximumValue={duration}
+                  value={currentTime}
+                  onSlidingStart={() => {
+                      isSlidingRef.current = true; // দাগ টানা শুরু
+                      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+                  }}
+                  onValueChange={(v) => setCurrentTime(v)} // টানার সময় ভ্যালু আপডেট
                   onSlidingComplete={async (v) => {
-                      player.currentTime = v;
+                      player.currentTime = v; // ভিডিও পজিশন আপডেট
                       if (streamMode === 'separate') await syncAudioWithVideo(v);
+                      isSlidingRef.current = false; // দাগ টানা শেষ
+                      triggerControls();
                   }}
                   minimumTrackTintColor="#FF0000"
                   thumbTintColor="#FF0000"
                 />
-                <Text style={styles.timeText}>{Math.floor(player.duration / 60)}:{Math.floor(player.duration % 60).toString().padStart(2, '0')}</Text>
                 
-                {/* --- [আপডেট ২: স্ক্রিন ঘুরিয়ে ফুলস্ক্রিন করার বাটন] --- */}
+                <Text style={styles.timeText}>{formatTime(duration)}</Text>
+                
                 <TouchableOpacity style={{marginLeft: 15}} onPress={() => videoViewRef.current?.enterFullscreen()}>
                     <Ionicons name="expand" size={24} color="#FFF" />
                 </TouchableOpacity>
@@ -282,7 +337,6 @@ export default function GlobalPlayer() {
           </View>
         )}
 
-        {/* ফলব্যাক মেসেজ */}
         {fallbackData && (
           <View style={styles.fallbackOverlay}>
             <Ionicons name="alert-circle" size={50} color="#FFD700" />
@@ -293,8 +347,7 @@ export default function GlobalPlayer() {
           </View>
         )}
         
-        {/* মিনি প্লেয়ার ওপেন বাটন */}
-        {!isFull && (
+        {!isInteractiveFull && (
             <TouchableOpacity activeOpacity={0.9} style={styles.miniTouchableArea} onPress={() => {
                 if (videoData) {
                     navigation.navigate('Player', { videoId: currentVideoIdRef.current, videoData });
@@ -313,9 +366,13 @@ export default function GlobalPlayer() {
 
 const styles = StyleSheet.create({
   fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
+  centerContainer: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
-  videoWrapper: { flex: 1, justifyContent: 'center' },
+  
+  videoWrapper: { flex: 1, justifyContent: 'center', width: '100%' },
+  videoWrapperCentered: { width: width, height: PLAYER_HEIGHT, justifyContent: 'center', position: 'relative' },
   video: { width: '100%', height: '100%' },
+  
   tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 5 },
   tapHalf: { flex: 1 },
   controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
