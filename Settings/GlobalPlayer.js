@@ -22,12 +22,10 @@ export default function GlobalPlayer() {
   const currentVideoIdRef = useRef(null);
   const fetchIdRef = useRef(0);
   
-  // ডাবল ট্যাপ এবং স্লাইডারের জন্য Ref
   const lastTapRef = useRef({ time: 0, side: '' });
   const tapTimeoutRef = useRef(null);
-  const isSlidingRef = useRef(false); // দাগটি ধরে টানার সময় ট্র্যাক করার জন্য
+  const isSlidingRef = useRef(false); 
 
-  // Player States
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
@@ -35,7 +33,6 @@ export default function GlobalPlayer() {
   const [isAudioMode, setIsAudioMode] = useState(false);
   const [fallbackData, setFallbackData] = useState(null);
 
-  // Time & Duration States (স্লাইডার সচল রাখার জন্য)
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(1);
 
@@ -55,7 +52,6 @@ export default function GlobalPlayer() {
     controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
   };
 
-  // অন্য স্ক্রিনে গেলে অটো মিনিমাইজ
   useEffect(() => {
     const unsubscribe = navigation.addListener('state', (e) => {
       if (!e.data.state) return;
@@ -111,6 +107,10 @@ export default function GlobalPlayer() {
       setCurrentTime(0);
       triggerControls();
 
+      // 🚨 ফিক্স: পুরনো অডিও আনলোড করে একদম ফ্রেশ অডিও ইঞ্জিন তৈরি করা হলো 🚨
+      await syncAudioRef.current.unloadAsync().catch(()=>{});
+      syncAudioRef.current = new Audio.Sound();
+
       const targetQuality = global.appSettings?.normalVideo || '720p';
       fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
     });
@@ -146,12 +146,16 @@ export default function GlobalPlayer() {
     setStreamMode(json.streamType || 'combined');
     setStreamUrl(json.url);
     if (json.audioUrl) {
+        // 🚨 ফিক্স: আবার কনফার্মেশনের জন্য ফ্রেশ ইঞ্জিন এবং ফুল ভলিউম নিশ্চিত করা হলো
         await syncAudioRef.current.unloadAsync().catch(()=>{});
-        await syncAudioRef.current.loadAsync({ uri: json.audioUrl }, { shouldPlay: player.playing }).catch(()=>{});
+        syncAudioRef.current = new Audio.Sound();
+        await syncAudioRef.current.loadAsync(
+            { uri: json.audioUrl }, 
+            { shouldPlay: true, volume: 1.0 }
+        ).catch(()=>{});
     }
   };
 
-  // ডাবল ট্যাপ করে স্কিপ করার লজিক
   const handleSkip = async (amount) => {
       let newTime = player.currentTime + amount;
       if (newTime < 0) newTime = 0;
@@ -170,7 +174,7 @@ export default function GlobalPlayer() {
       if (lastTapRef.current.side === side && (now - lastTapRef.current.time) < DOUBLE_TAP_DELAY) {
           clearTimeout(tapTimeoutRef.current);
           lastTapRef.current = { time: 0, side: '' }; 
-          handleSkip(side === 'right' ? 10 : -10); // ১০ সেকেন্ড স্কিপ
+          handleSkip(side === 'right' ? 10 : -10); 
       } else {
           lastTapRef.current = { time: now, side };
           tapTimeoutRef.current = setTimeout(() => {
@@ -181,7 +185,6 @@ export default function GlobalPlayer() {
       }
   };
 
-  // থিয়েটার মোড সোয়াইপ লজিক
   const verticalPanResponder = useRef(PanResponder.create({
       onMoveShouldSetPanResponder: (evt, gestureState) => {
           return Math.abs(gestureState.dy) > 30 && Math.abs(gestureState.vy) > 0.5;
@@ -219,31 +222,39 @@ export default function GlobalPlayer() {
     }
   })).current;
 
-  // স্লাইডার এবং অডিও সিঙ্কিং মনিটর (সুপার স্মুথ আপডেট)
+  // 🚨 আপডেট: অডিও সিঙ্কিং মনিটর আরও স্ট্রং করা হয়েছে
   useEffect(() => {
     const interval = setInterval(async () => {
-        // ১. ভিডিওর সময় আপডেট করা (যদি দাগ ধরে টানা না হয়)
         if (!isSlidingRef.current && player) {
             setCurrentTime(player.currentTime);
             setDuration(player.duration > 0 ? player.duration : 1);
         }
 
-        // ২. অডিও সিঙ্কিং চেক করা
-        if (streamMode === 'separate' && player.playing) {
+        if (streamMode === 'separate') {
             const audioStatus = await syncAudioRef.current.getStatusAsync();
             if (audioStatus.isLoaded) {
-                const diff = Math.abs((player.currentTime * 1000) - audioStatus.positionMillis);
-                if (diff > 500) await syncAudioRef.current.setPositionAsync(player.currentTime * 1000);
-                if (!audioStatus.isPlaying) await syncAudioRef.current.playAsync();
+                if (player.playing) {
+                    const diff = Math.abs((player.currentTime * 1000) - audioStatus.positionMillis);
+                    if (diff > 500) await syncAudioRef.current.setPositionAsync(player.currentTime * 1000);
+                    if (!audioStatus.isPlaying) await syncAudioRef.current.playAsync();
+                } else {
+                    // ভিডিও পজ থাকলে অডিও জোর করে পজ করবে
+                    if (audioStatus.isPlaying) await syncAudioRef.current.pauseAsync().catch(()=>{});
+                }
             }
-        } else if (!player.playing) {
-            await syncAudioRef.current.pauseAsync().catch(()=>{});
         }
     }, 1000);
     return () => clearInterval(interval);
   }, [player, streamMode]);
 
-  // টাইম ফরম্যাটিং হেল্পার
+  // প্লেয়ার ক্লোজ করার লজিক
+  const closePlayer = async () => {
+      setPlayerState('hidden');
+      setStreamUrl(null);
+      if (player) player.pause();
+      await syncAudioRef.current.unloadAsync().catch(()=>{});
+  };
+
   const formatTime = (timeInSeconds) => {
       if (isNaN(timeInSeconds)) return "00:00";
       const m = Math.floor(timeInSeconds / 60);
@@ -276,7 +287,6 @@ export default function GlobalPlayer() {
           />
         )}
 
-        {/* ডাবল ট্যাপ এবং সিঙ্গেল ট্যাপ ডিটেকশন লেয়ার */}
         {isInteractiveFull && !fallbackData && (
             <View style={styles.tapOverlay}>
                 <TouchableWithoutFeedback onPress={() => handleTap('left')}><View style={styles.tapHalf} /></TouchableWithoutFeedback>
@@ -284,7 +294,6 @@ export default function GlobalPlayer() {
             </View>
         )}
 
-        {/* কন্ট্রোল বার */}
         {isInteractiveFull && showControls && !fallbackData && (
           <View style={styles.controls} pointerEvents="box-none">
              <TouchableOpacity style={styles.backBtn} onPress={() => {
@@ -299,7 +308,17 @@ export default function GlobalPlayer() {
              </TouchableOpacity>
              
              <View style={styles.centerRow} pointerEvents="box-none">
-                <TouchableOpacity onPress={() => player.playing ? player.pause() : player.play()}>
+                {/* 🚨 ফিক্স: প্লে/পজ বাটনে অডিও সরাসরি কানেক্টেড 🚨 */}
+                <TouchableOpacity onPress={async () => {
+                    if (player.playing) {
+                        player.pause();
+                        if (streamMode === 'separate') await syncAudioRef.current.pauseAsync().catch(()=>{});
+                    } else {
+                        player.play();
+                        if (streamMode === 'separate') await syncAudioRef.current.playAsync().catch(()=>{});
+                    }
+                    triggerControls();
+                }}>
                    <Ionicons name={player.playing ? "pause-circle" : "play-circle"} size={75} color="#FFF" />
                 </TouchableOpacity>
              </View>
@@ -307,21 +326,20 @@ export default function GlobalPlayer() {
              <View style={styles.bottomBar}>
                 <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
                 
-                {/* 🚨 আপডেট: নিখুঁত প্রগ্রেস বার (দাগ টানা) 🚨 */}
                 <Slider 
                   style={{flex: 1, height: 40, marginHorizontal: 10}}
                   minimumValue={0}
                   maximumValue={duration}
                   value={currentTime}
                   onSlidingStart={() => {
-                      isSlidingRef.current = true; // দাগ টানা শুরু
+                      isSlidingRef.current = true; 
                       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
                   }}
-                  onValueChange={(v) => setCurrentTime(v)} // টানার সময় ভ্যালু আপডেট
+                  onValueChange={(v) => setCurrentTime(v)} 
                   onSlidingComplete={async (v) => {
-                      player.currentTime = v; // ভিডিও পজিশন আপডেট
+                      player.currentTime = v; 
                       if (streamMode === 'separate') await syncAudioWithVideo(v);
-                      isSlidingRef.current = false; // দাগ টানা শেষ
+                      isSlidingRef.current = false; 
                       triggerControls();
                   }}
                   minimumTrackTintColor="#FF0000"
@@ -354,7 +372,7 @@ export default function GlobalPlayer() {
                     setPlayerState('full');
                 }
             }}>
-                <TouchableOpacity onPress={() => setPlayerState('hidden')} style={styles.miniCloseBtn}>
+                <TouchableOpacity onPress={closePlayer} style={styles.miniCloseBtn}>
                     <Ionicons name="close-circle" size={28} color="#FFF" />
                 </TouchableOpacity>
             </TouchableOpacity>
