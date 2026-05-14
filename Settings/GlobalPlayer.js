@@ -27,6 +27,7 @@ export default function GlobalPlayer() {
   const scale = useRef(new Animated.Value(1)).current;
   const baseScaleRef = useRef(1);
   const initialDistanceRef = useRef(null);
+  const isZoomingRef = useRef(false); // জুম ট্র্যাকার
   
   const lastTapRef = useRef({ time: 0, side: '' });
   const tapTimeoutRef = useRef(null);
@@ -95,9 +96,8 @@ export default function GlobalPlayer() {
     return () => backHandler.remove();
   }, [playerState, navigation, isFullscreen]);
 
-  // প্লেয়ার স্টেট পরিবর্তন হলে জুম রিসেট করে স্বাভাবিক করা
   useEffect(() => {
-      Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start();
+      Animated.spring(scale, { toValue: 1, useNativeDriver: false }).start();
       baseScaleRef.current = 1;
   }, [playerState]);
 
@@ -142,7 +142,6 @@ export default function GlobalPlayer() {
       setIsAudioMode(false);
       setCurrentTime(0);
       
-      // নতুন ভিডিও প্লে হলে জুম রিসেট করা
       scale.setValue(1);
       baseScaleRef.current = 1;
       triggerControls();
@@ -220,71 +219,71 @@ export default function GlobalPlayer() {
       }
   };
 
-  // 🚨 আপডেট: জুম, ট্যাপ এবং সোয়াইপের জন্য একটি সুপার PanResponder তৈরি করা হলো 🚨
+  // 🚨 আপডেট: ডাবল ট্যাপ এবং জুমের বাগ ১০০% ফিক্স করা হয়েছে 🚨
   const videoPanResponder = useRef(PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt, gestureState) => {
-          const touches = evt.nativeEvent.touches;
-          // দুই আঙুল দিয়ে চাপলে দূরত্ব মাপা শুরু হবে
-          if (touches.length === 2) {
-              const dx = touches[0].pageX - touches[1].pageX;
-              const dy = touches[0].pageY - touches[1].pageY;
-              initialDistanceRef.current = Math.sqrt(dx*dx + dy*dy);
-          }
+      onPanResponderGrant: () => {
+          isZoomingRef.current = false;
       },
       onPanResponderMove: (evt, gestureState) => {
           const touches = evt.nativeEvent.touches;
-          // দুই আঙুল নড়াচড়া করলে জুম হবে
-          if (touches.length === 2 && initialDistanceRef.current) {
+          // যখনই দুই আঙুল স্ক্রিনে থাকবে, জুম শুরু হবে
+          if (touches && touches.length >= 2) {
+              isZoomingRef.current = true;
               const dx = touches[0].pageX - touches[1].pageX;
               const dy = touches[0].pageY - touches[1].pageY;
               const currentDistance = Math.sqrt(dx*dx + dy*dy);
-              let newScale = baseScaleRef.current * (currentDistance / initialDistanceRef.current);
-              
-              if (newScale < 0.2) newScale = 0.2; // সর্বোচ্চ ছোট (২০%)
-              if (newScale > 6.0) newScale = 6.0; // সর্বোচ্চ বড় (৬০০%)
-              
-              scale.setValue(newScale);
-          }
-      },
-      onPanResponderRelease: (evt, gestureState) => {
-          if (initialDistanceRef.current) {
-              // জুম করা শেষ হলে বর্তমান স্কেল সেভ করা
-              baseScaleRef.current = scale._value;
-              initialDistanceRef.current = null;
-          } else {
-              // এক আঙুলের কাজ (ট্যাপ বা সোয়াইপ)
-              if (Math.abs(gestureState.dx) < 10 && Math.abs(gestureState.dy) < 10) {
-                  // সিঙ্গেল বা ডাবল ট্যাপ
-                  const screenWidth = Dimensions.get('window').width;
-                  const side = evt.nativeEvent.pageX < (screenWidth / 2) ? 'left' : 'right';
-                  handleTap(side);
+
+              if (!initialDistanceRef.current) {
+                  initialDistanceRef.current = currentDistance;
               } else {
-                  // থিয়েটার মোড সোয়াইপ (ওপর/নিচে)
-                  if (gestureState.dy > 50 && Math.abs(gestureState.vy) > 0.5) {
-                      setPlayerState(prev => {
-                          if (prev === 'fullscreen') { toggleFullscreen(); return 'mini'; }
-                          if (prev === 'full') return 'center'; 
-                          if (prev === 'center') {
-                              if (navigation.canGoBack()) navigation.goBack();
-                              return 'mini'; 
-                          }
-                          return prev;
-                      });
-                  } else if (gestureState.dy < -50 && Math.abs(gestureState.vy) > 0.5) {
-                      setPlayerState(prev => {
-                          if (prev === 'center') return 'full'; 
-                          return prev;
-                      });
-                  }
+                  let newScale = baseScaleRef.current * (currentDistance / initialDistanceRef.current);
+                  if (newScale < 0.2) newScale = 0.2; // ২০% ছোট
+                  if (newScale > 6.0) newScale = 6.0; // ৬০০% বড়
+                  scale.setValue(newScale);
               }
           }
       },
-      onPanResponderTerminate: () => {
-          if (initialDistanceRef.current) {
+      onPanResponderRelease: (evt, gestureState) => {
+          // যদি জুম করা হয়, তবে রিলিজের পর আর ট্যাপ/সোয়াইপ কাজ করবে না
+          if (isZoomingRef.current) {
               baseScaleRef.current = scale._value;
               initialDistanceRef.current = null;
+              setTimeout(() => { isZoomingRef.current = false; }, 100);
+              return;
+          }
+
+          // থিয়েটার মোড সোয়াইপ
+          if (gestureState.dy > 50 && Math.abs(gestureState.vy) > 0.5) {
+              setPlayerState(prev => {
+                  if (prev === 'fullscreen') { toggleFullscreen(); return 'mini'; }
+                  if (prev === 'full') return 'center'; 
+                  if (prev === 'center') {
+                      if (navigation.canGoBack()) navigation.goBack();
+                      return 'mini'; 
+                  }
+                  return prev;
+              });
+          } else if (gestureState.dy < -50 && Math.abs(gestureState.vy) > 0.5) {
+              setPlayerState(prev => {
+                  if (prev === 'center') return 'full'; 
+                  return prev;
+              });
+          } 
+          // 🚨 ফিক্স: সিঙ্গেল বা ডাবল ট্যাপের পজিশন নির্ণয় 🚨
+          else if (Math.abs(gestureState.dx) < 15 && Math.abs(gestureState.dy) < 15) {
+              const screenWidth = Dimensions.get('window').width;
+              // x0 হলো একদম প্রথমে আঙুল পড়ার পজিশন (যা রিলিজের পরও মুছে যায় না)
+              const side = gestureState.x0 < (screenWidth / 2) ? 'left' : 'right';
+              handleTap(side);
+          }
+      },
+      onPanResponderTerminate: () => {
+          if (isZoomingRef.current) {
+              baseScaleRef.current = scale._value;
+              initialDistanceRef.current = null;
+              isZoomingRef.current = false;
           }
       }
   })).current;
@@ -357,7 +356,6 @@ export default function GlobalPlayer() {
     >
       <View style={playerState === 'center' || playerState === 'fullscreen' ? styles.videoWrapperCentered : styles.videoWrapper}>
         
-        {/* 🚨 জুম করার জন্য ভিডিওকে Animated.View এর ভেতর রাখা হলো 🚨 */}
         {streamUrl && !fallbackData && !isAudioMode && (
           <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
               <VideoView 
@@ -370,12 +368,10 @@ export default function GlobalPlayer() {
           </Animated.View>
         )}
 
-        {/* ট্যাপ, সোয়াইপ এবং জুম লেয়ার */}
         {isInteractiveFull && !fallbackData && (
             <View style={styles.tapOverlay} {...videoPanResponder.panHandlers} />
         )}
 
-        {/* কন্ট্রোল বার (এটি জুম হবে না, তাই সুন্দরভাবে কাজ করবে) */}
         {isInteractiveFull && showControls && !fallbackData && (
           <View style={styles.controls} pointerEvents="box-none">
              
@@ -460,10 +456,10 @@ const styles = StyleSheet.create({
   
   videoWrapper: { flex: 1, justifyContent: 'center', width: '100%' },
   videoWrapperCentered: { width: '100%', height: '100%', justifyContent: 'center', position: 'relative' },
-  animatedVideoWrapper: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }, // 🚨 জুমের জন্য নতুন লেয়ার 🚨
+  animatedVideoWrapper: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
   video: { width: '100%', height: '100%' },
   
-  tapOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 5 }, // 🚨 ট্যাপ এবং জুমের লেয়ার 🚨
+  tapOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 5 }, 
   controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
   centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 },
   bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 20 },
