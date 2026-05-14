@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Slider from '@react-native-community/slider';
+import * as ScreenOrientation from 'expo-screen-orientation'; // 🚨 নতুন ফুলস্ক্রিন প্যাকেজ 🚨
 
 LogBox.ignoreLogs(['[expo-av]', 'Video component from `expo-av`']);
 
@@ -27,6 +28,7 @@ export default function GlobalPlayer() {
   const isSlidingRef = useRef(false); 
 
   const [playerState, setPlayerState] = useState('hidden'); 
+  const [isFullscreen, setIsFullscreen] = useState(false); // ফুলস্ক্রিন ট্র্যাকার
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
   const [streamMode, setStreamMode] = useState('combined');
@@ -52,6 +54,7 @@ export default function GlobalPlayer() {
     controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
   };
 
+  // অন্য স্ক্রিনে গেলে অটো মিনিমাইজ
   useEffect(() => {
     const unsubscribe = navigation.addListener('state', (e) => {
       if (!e.data.state) return;
@@ -60,20 +63,24 @@ export default function GlobalPlayer() {
       
       if (currentRoute !== 'Player' && currentRoute !== 'PlayerScreen') {
           setPlayerState((prev) => {
-              if (prev === 'full' || prev === 'center') return 'mini';
+              if (prev === 'full' || prev === 'center' || prev === 'fullscreen') {
+                  if (isFullscreen) toggleFullscreen(); // ল্যান্ডস্কেপ থাকলে সোজা করবে
+                  return 'mini';
+              }
               return prev;
           });
       }
     });
     return unsubscribe;
-  }, [navigation]);
+  }, [navigation, isFullscreen]);
 
+  // 🚨 ফিক্স ৩: হার্ডওয়্যার ব্যাক বাটন লজিক 🚨
   useEffect(() => {
     const backAction = () => {
-      if (playerState === 'center') {
-        setPlayerState('full');
+      if (playerState === 'fullscreen') {
+        toggleFullscreen(); // ফুলস্ক্রিন থেকে ছোট করবে
         return true;
-      } else if (playerState === 'full') {
+      } else if (playerState === 'center' || playerState === 'full') {
         setPlayerState('mini');
         if (navigation.canGoBack()) navigation.goBack();
         else navigation.navigate('Home');
@@ -83,7 +90,24 @@ export default function GlobalPlayer() {
     };
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => backHandler.remove();
-  }, [playerState, navigation]);
+  }, [playerState, navigation, isFullscreen]);
+
+  // 🚨 ফিক্স ৫: কাস্টম ফুলস্ক্রিন লজিক (অডিও ঠিক রাখবে) 🚨
+  const toggleFullscreen = async () => {
+    try {
+        if (isFullscreen) {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+            setIsFullscreen(false);
+            setPlayerState('full');
+        } else {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+            setIsFullscreen(true);
+            setPlayerState('fullscreen');
+        }
+    } catch (error) {
+        console.log("Orientation Error: ", error);
+    }
+  };
 
   const syncAudioWithVideo = async (targetPositionSeconds) => {
       try {
@@ -97,6 +121,13 @@ export default function GlobalPlayer() {
 
   useEffect(() => {
     const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
+      // 🚨 ফিক্স ১: ভিডিও আগে থেকেই চললে রিলোড হবে না 🚨
+      if (currentVideoIdRef.current === data.videoId) {
+          setPlayerState('full');
+          if (isFullscreen) toggleFullscreen();
+          return;
+      }
+
       fetchIdRef.current = Date.now();
       currentVideoIdRef.current = data.videoId;
       setVideoData(data.videoData);
@@ -107,7 +138,6 @@ export default function GlobalPlayer() {
       setCurrentTime(0);
       triggerControls();
 
-      // 🚨 ফিক্স: পুরনো অডিও আনলোড করে একদম ফ্রেশ অডিও ইঞ্জিন তৈরি করা হলো 🚨
       await syncAudioRef.current.unloadAsync().catch(()=>{});
       syncAudioRef.current = new Audio.Sound();
 
@@ -115,7 +145,7 @@ export default function GlobalPlayer() {
       fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
     });
     return () => playSub.remove();
-  }, []);
+  }, [isFullscreen]);
 
   const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
     try {
@@ -146,13 +176,9 @@ export default function GlobalPlayer() {
     setStreamMode(json.streamType || 'combined');
     setStreamUrl(json.url);
     if (json.audioUrl) {
-        // 🚨 ফিক্স: আবার কনফার্মেশনের জন্য ফ্রেশ ইঞ্জিন এবং ফুল ভলিউম নিশ্চিত করা হলো
         await syncAudioRef.current.unloadAsync().catch(()=>{});
         syncAudioRef.current = new Audio.Sound();
-        await syncAudioRef.current.loadAsync(
-            { uri: json.audioUrl }, 
-            { shouldPlay: true, volume: 1.0 }
-        ).catch(()=>{});
+        await syncAudioRef.current.loadAsync({ uri: json.audioUrl }, { shouldPlay: true, volume: 1.0 }).catch(()=>{});
     }
   };
 
@@ -192,6 +218,7 @@ export default function GlobalPlayer() {
       onPanResponderRelease: (evt, gestureState) => {
           if (gestureState.dy > 50) {
               setPlayerState(prev => {
+                  if (prev === 'fullscreen') { toggleFullscreen(); return 'mini'; }
                   if (prev === 'full') return 'center'; 
                   if (prev === 'center') {
                       if (navigation.canGoBack()) navigation.goBack();
@@ -222,7 +249,6 @@ export default function GlobalPlayer() {
     }
   })).current;
 
-  // 🚨 আপডেট: অডিও সিঙ্কিং মনিটর আরও স্ট্রং করা হয়েছে
   useEffect(() => {
     const interval = setInterval(async () => {
         if (!isSlidingRef.current && player) {
@@ -238,7 +264,6 @@ export default function GlobalPlayer() {
                     if (diff > 500) await syncAudioRef.current.setPositionAsync(player.currentTime * 1000);
                     if (!audioStatus.isPlaying) await syncAudioRef.current.playAsync();
                 } else {
-                    // ভিডিও পজ থাকলে অডিও জোর করে পজ করবে
                     if (audioStatus.isPlaying) await syncAudioRef.current.pauseAsync().catch(()=>{});
                 }
             }
@@ -247,9 +272,9 @@ export default function GlobalPlayer() {
     return () => clearInterval(interval);
   }, [player, streamMode]);
 
-  // প্লেয়ার ক্লোজ করার লজিক
   const closePlayer = async () => {
       setPlayerState('hidden');
+      if (isFullscreen) await toggleFullscreen();
       setStreamUrl(null);
       if (player) player.pause();
       await syncAudioRef.current.unloadAsync().catch(()=>{});
@@ -263,11 +288,12 @@ export default function GlobalPlayer() {
   };
 
   if (playerState === 'hidden') return null;
-  const isInteractiveFull = playerState === 'full' || playerState === 'center';
+  const isInteractiveFull = playerState === 'full' || playerState === 'center' || playerState === 'fullscreen';
 
   return (
     <Animated.View 
         style={[
+            playerState === 'fullscreen' ? styles.fullscreenContainer : 
             playerState === 'full' ? styles.fullContainer : 
             playerState === 'center' ? styles.centerContainer : 
             styles.miniContainer, 
@@ -275,7 +301,7 @@ export default function GlobalPlayer() {
         ]} 
         {...(isInteractiveFull ? verticalPanResponder.panHandlers : miniPanResponder.panHandlers)}
     >
-      <View style={playerState === 'center' ? styles.videoWrapperCentered : styles.videoWrapper}>
+      <View style={playerState === 'center' || playerState === 'fullscreen' ? styles.videoWrapperCentered : styles.videoWrapper}>
         
         {streamUrl && !fallbackData && !isAudioMode && (
           <VideoView 
@@ -283,7 +309,7 @@ export default function GlobalPlayer() {
             player={player} 
             style={styles.video} 
             contentFit="contain"
-            allowsFullscreen 
+            nativeControls={false} // 🚨 ফিক্স ৪: ডাবল বাটন হাইড করা হলো 🚨
           />
         )}
 
@@ -296,19 +322,10 @@ export default function GlobalPlayer() {
 
         {isInteractiveFull && showControls && !fallbackData && (
           <View style={styles.controls} pointerEvents="box-none">
-             <TouchableOpacity style={styles.backBtn} onPress={() => {
-                 if(playerState === 'center') {
-                     setPlayerState('full');
-                 } else {
-                     setPlayerState('mini');
-                     if (navigation.canGoBack()) navigation.goBack();
-                 }
-             }}>
-                <Ionicons name="chevron-down" size={35} color="#FFF" />
-             </TouchableOpacity>
              
+             {/* 🚨 ফিক্স ২: ওপরের বাম দিকের ব্যাক বাটনটি মুছে দেওয়া হয়েছে 🚨 */}
+
              <View style={styles.centerRow} pointerEvents="box-none">
-                {/* 🚨 ফিক্স: প্লে/পজ বাটনে অডিও সরাসরি কানেক্টেড 🚨 */}
                 <TouchableOpacity onPress={async () => {
                     if (player.playing) {
                         player.pause();
@@ -345,11 +362,10 @@ export default function GlobalPlayer() {
                   minimumTrackTintColor="#FF0000"
                   thumbTintColor="#FF0000"
                 />
-                
                 <Text style={styles.timeText}>{formatTime(duration)}</Text>
                 
-                <TouchableOpacity style={{marginLeft: 15}} onPress={() => videoViewRef.current?.enterFullscreen()}>
-                    <Ionicons name="expand" size={24} color="#FFF" />
+                <TouchableOpacity style={{marginLeft: 15}} onPress={toggleFullscreen}>
+                    <Ionicons name={isFullscreen ? "contract" : "expand"} size={24} color="#FFF" />
                 </TouchableOpacity>
              </View>
           </View>
@@ -383,18 +399,18 @@ export default function GlobalPlayer() {
 }
 
 const styles = StyleSheet.create({
-  fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
+  fullscreenContainer: { ...StyleSheet.absoluteFillObject, zIndex: 99999, backgroundColor: '#000' }, // 🚨 নতুন ফুলস্ক্রিন স্টাইল 🚨
+  fullContainer: { position: 'absolute', top: 55, left: 0, right: 0, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
   centerContainer: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
   
   videoWrapper: { flex: 1, justifyContent: 'center', width: '100%' },
-  videoWrapperCentered: { width: width, height: PLAYER_HEIGHT, justifyContent: 'center', position: 'relative' },
+  videoWrapperCentered: { width: '100%', height: '100%', justifyContent: 'center', position: 'relative' },
   video: { width: '100%', height: '100%' },
   
   tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 5 },
   tapHalf: { flex: 1 },
   controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
-  backBtn: { position: 'absolute', top: 10, left: 10, zIndex: 20 },
   centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 },
   bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 20 },
   timeText: { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
