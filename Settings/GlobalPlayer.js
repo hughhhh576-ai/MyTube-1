@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
 import { Audio } from 'expo-av'; 
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import Slider from '@react-native-community/slider';
 import * as ScreenOrientation from 'expo-screen-orientation'; 
 import * as WebBrowser from 'expo-web-browser'; 
+import AsyncStorage from '@react-native-async-storage/async-storage'; // 🚨 নতুন স্টোরেজ প্যাকেজ 🚨
 
 LogBox.ignoreLogs(['[expo-av]', 'Video component from `expo-av`']);
 
@@ -41,18 +42,12 @@ export default function GlobalPlayer() {
   const [isFullscreen, setIsFullscreen] = useState(false); 
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
-  
-  const [videoSource, setVideoSource] = useState(null); 
-  const resumeTimeRef = useRef(0); 
-
   const [streamMode, setStreamMode] = useState('combined');
   const [isAudioMode, setIsAudioMode] = useState(false);
   const [fallbackData, setFallbackData] = useState(null);
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(1);
-  const [buffered, setBuffered] = useState(0); 
-  const [isPlayingUI, setIsPlayingUI] = useState(false); 
 
   const [showControls, setShowControls] = useState(true);
   const controlsTimeoutRef = useRef(null);
@@ -63,18 +58,10 @@ export default function GlobalPlayer() {
   
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
-  const isAudioModeRef = useRef(false);
-  const streamModeRef = useRef('combined');
-  const cachedAudioUrlRef = useRef(null); 
-  
-  // 🚨 CPU সেভার: একই সাথে একাধিক সিঙ্ক কমান্ড যেন না যায় তার জন্য লক 🚨
-  const isSyncingRef = useRef(false);
-
-  // 🚨 ক্র্যাশ ফিক্স ১: এখান থেকে setTimeout পুরোপুরি সরিয়ে দেওয়া হয়েছে 🚨
-  const player = useVideoPlayer(videoSource, (p) => {
-    if (!videoSource) return; 
+  const player = useVideoPlayer(streamUrl, (p) => {
     p.loop = false;
     p.playbackRate = currentSpeed; 
+    p.play();
   });
 
   const triggerControls = () => {
@@ -82,35 +69,6 @@ export default function GlobalPlayer() {
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
   };
-
-  useEffect(() => {
-    const setupAudio = async () => {
-      try {
-        await Audio.setAudioModeAsync({
-          staysActiveInBackground: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-        });
-      } catch (e) { console.log("Audio Setup Error:", e); }
-    };
-    setupAudio();
-  }, []);
-
-  useEffect(() => {
-    const appStateSub = AppState.addEventListener('change', async (nextAppState) => {
-        if (nextAppState.match(/inactive|background/)) {
-            if (!isAudioModeRef.current) {
-                if (player && player.playing) player.pause();
-                const status = await syncAudioRef.current.getStatusAsync();
-                if (status.isLoaded && status.isPlaying) {
-                    await syncAudioRef.current.pauseAsync().catch(()=>{});
-                }
-            }
-        }
-    });
-    return () => appStateSub.remove();
-  }, [player]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('state', (e) => {
@@ -140,7 +98,6 @@ export default function GlobalPlayer() {
           return true;
       } else if (playerState === 'center' || playerState === 'full') {
           setPlayerState('mini');
-          
           const state = navigation.getState();
           if (state && state.routes) {
               const routes = state.routes;
@@ -182,7 +139,7 @@ export default function GlobalPlayer() {
             scale.setValue(1); 
             baseScaleRef.current = 1;
         }
-    } catch (error) { console.log(error); }
+    } catch (error) {}
   };
 
   const syncAudioWithVideo = async (targetPositionSeconds) => {
@@ -190,7 +147,7 @@ export default function GlobalPlayer() {
           const status = await syncAudioRef.current.getStatusAsync();
           if (status.isLoaded) {
               await syncAudioRef.current.setPositionAsync(targetPositionSeconds * 1000);
-              if (player && player.playing) await syncAudioRef.current.playAsync();
+              if (player.playing) await syncAudioRef.current.playAsync();
           }
       } catch (e) {}
   };
@@ -207,18 +164,11 @@ export default function GlobalPlayer() {
       currentVideoIdRef.current = data.videoId;
       setVideoData(data.videoData);
       setPlayerState('full');
-      
       setStreamUrl(null);
-      setVideoSource(null); 
-      resumeTimeRef.current = 0; 
-      
       setFallbackData(null);
       setIsAudioMode(false);
-      isAudioModeRef.current = false;
-      cachedAudioUrlRef.current = null;
-      
       setCurrentTime(0);
-      setBuffered(0);
+      
       scale.setValue(1);
       baseScaleRef.current = 1;
       triggerControls();
@@ -229,82 +179,8 @@ export default function GlobalPlayer() {
       const targetQuality = global.appSettings?.normalVideo || '720p';
       fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
     });
-
-    const audioModeSub = DeviceEventEmitter.addListener('toggleAudioMode', async (mode) => {
-      setIsAudioMode(mode);
-      isAudioModeRef.current = mode;
-
-      if (mode) {
-          resumeTimeRef.current = player ? player.currentTime : 0;
-          setVideoSource(null); 
-          setIsPlayingUI(false); 
-          
-          let audioUrlToPlay = cachedAudioUrlRef.current;
-
-          if (!audioUrlToPlay) {
-              try {
-                  const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&action=play&type=audio`);
-                  const json = await res.json();
-                  if (json.success && (json.audioUrl || json.url)) {
-                      audioUrlToPlay = json.audioUrl || json.url;
-                      cachedAudioUrlRef.current = audioUrlToPlay; 
-                  }
-              } catch (e) { console.log(e); }
-          }
-
-          if (audioUrlToPlay) {
-              await syncAudioRef.current.unloadAsync().catch(()=>{});
-              syncAudioRef.current = new Audio.Sound();
-              await syncAudioRef.current.loadAsync(
-                  { uri: audioUrlToPlay }, 
-                  { shouldPlay: true, positionMillis: resumeTimeRef.current * 1000, rate: currentSpeed }
-              ).catch(()=>{});
-          }
-
-      } else {
-          const status = await syncAudioRef.current.getStatusAsync();
-          let resumeVideoTime = resumeTimeRef.current;
-
-          if (status.isLoaded) {
-              resumeVideoTime = status.positionMillis / 1000;
-              if (streamModeRef.current !== 'separate') {
-                  await syncAudioRef.current.unloadAsync().catch(()=>{});
-              } else {
-                  await syncAudioRef.current.pauseAsync().catch(()=>{});
-              }
-          }
-
-          resumeTimeRef.current = resumeVideoTime;
-          setVideoSource(streamUrl); 
-      }
-    });
-
-    return () => {
-        playSub.remove();
-        audioModeSub.remove();
-    };
-  }, [isFullscreen, streamUrl]);
-
-  // 🚨 ক্র্যাশ ফিক্স ২: প্লেয়ার শুধু এখান থেকেই রেডি হবে 🚨
-  useEffect(() => {
-      let timeoutId;
-      if (!isAudioMode && videoSource && player) {
-          timeoutId = setTimeout(async () => {
-              try {
-                  if (resumeTimeRef.current > 0) {
-                      player.currentTime = resumeTimeRef.current;
-                  }
-                  player.play();
-
-                  if (streamModeRef.current === 'separate') {
-                      await syncAudioRef.current.setPositionAsync(resumeTimeRef.current * 1000).catch(()=>{});
-                      await syncAudioRef.current.playAsync().catch(()=>{});
-                  }
-              } catch (e) { console.log("Resume Error: ", e); }
-          }, 800); 
-      }
-      return () => clearTimeout(timeoutId);
-  }, [videoSource, isAudioMode]);
+    return () => playSub.remove();
+  }, [isFullscreen]);
 
   const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
     try {
@@ -333,12 +209,7 @@ export default function GlobalPlayer() {
 
   const startPlayback = async (json) => {
     setStreamMode(json.streamType || 'combined');
-    streamModeRef.current = json.streamType || 'combined';
-    cachedAudioUrlRef.current = json.audioUrl || null; 
-    
     setStreamUrl(json.url);
-    setVideoSource(json.url); 
-    
     if (json.audioUrl) {
         await syncAudioRef.current.unloadAsync().catch(()=>{});
         syncAudioRef.current = new Audio.Sound();
@@ -350,20 +221,14 @@ export default function GlobalPlayer() {
   };
 
   const handleSkip = async (amount, isSilent = false) => {
-      let currentPosition = isAudioMode ? currentTime : (player ? player.currentTime : currentTime);
-      let newTime = currentPosition + amount;
-      
+      let newTime = player.currentTime + amount;
       if (newTime < 0) newTime = 0;
-      if (newTime > duration) newTime = duration;
+      if (newTime > player.duration) newTime = player.duration;
       
-      if (isAudioMode) {
-          await syncAudioRef.current.setPositionAsync(newTime * 1000);
-      } else if (player) {
-          player.currentTime = newTime; 
-          if (streamMode === 'separate') await syncAudioWithVideo(newTime); 
-      }
-      
+      player.currentTime = newTime; 
       setCurrentTime(newTime);
+      if (streamMode === 'separate') await syncAudioWithVideo(newTime); 
+      
       if (!isSilent) triggerControls(); 
   };
 
@@ -398,58 +263,36 @@ export default function GlobalPlayer() {
       setShowSettingsMenu(false);
   };
 
-  // 🚨 ক্র্যাশ ফিক্স ৩: CPU সেভার সিঙ্ক অপ্টিমাইজেশন 🚨
-  useEffect(() => {
-    const interval = setInterval(async () => {
-        if (isSyncingRef.current) return; 
+  // 🚨 প্লেলিস্টে সেভ করার লজিক 🚨
+  const saveToPlaylist = async () => {
+      setShowSettingsMenu(false);
+      try {
+          const vidId = currentVideoIdRef.current;
+          if (!vidId) return;
 
-        if (isAudioMode) {
-            isSyncingRef.current = true;
-            try {
-                const audioStatus = await syncAudioRef.current.getStatusAsync();
-                if (audioStatus.isLoaded) {
-                    setIsPlayingUI(audioStatus.isPlaying);
-                    if (audioStatus.playableDurationMillis) setBuffered(audioStatus.playableDurationMillis / 1000);
-                    if (!isSlidingRef.current) {
-                        setCurrentTime(audioStatus.positionMillis / 1000);
-                        if (audioStatus.durationMillis) setDuration(audioStatus.durationMillis / 1000);
-                    }
-                }
-            } catch(e) {}
-            isSyncingRef.current = false;
-        } else {
-            setIsPlayingUI(player?.playing || false);
-            
-            if (player) {
-                if (player.bufferedPosition) setBuffered(player.bufferedPosition); 
-                if (!isSlidingRef.current && (player.currentTime > 0 || player.playing)) {
-                    setCurrentTime(player.currentTime);
-                    setDuration(player.duration > 0 ? player.duration : 1);
-                }
-            }
+          const newVideo = {
+              id: vidId,
+              title: videoData?.title || fallbackData?.data?.title || "Unknown Video",
+              channel: videoData?.channel || "Unknown Channel",
+              views: videoData?.views || "",
+              thumbnail: videoData?.thumbnail || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`
+          };
 
-            if (streamMode === 'separate' && videoSource) {
-                isSyncingRef.current = true;
-                try {
-                    const audioStatus = await syncAudioRef.current.getStatusAsync();
-                    if (audioStatus.isLoaded) {
-                        if (player && player.playing) {
-                            const diff = Math.abs((player.currentTime * 1000) - audioStatus.positionMillis);
-                            if (diff > 800) { 
-                                await syncAudioRef.current.setPositionAsync(player.currentTime * 1000);
-                            }
-                            if (!audioStatus.isPlaying) await syncAudioRef.current.playAsync();
-                        } else {
-                            if (audioStatus.isPlaying) await syncAudioRef.current.pauseAsync().catch(()=>{});
-                        }
-                    }
-                } catch(e) {}
-                isSyncingRef.current = false;
-            }
-        }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [player, streamMode, isAudioMode, videoSource]);
+          const existingData = await AsyncStorage.getItem('my_saved_playlist');
+          let playlist = existingData ? JSON.parse(existingData) : [];
+
+          if (playlist.some(v => v.id === vidId)) {
+              alert("এই ভিডিওটি আগে থেকেই প্লেলিস্টে আছে!");
+          } else {
+              playlist.unshift(newVideo); // নতুন ভিডিও সবার ওপরে থাকবে
+              await AsyncStorage.setItem('my_saved_playlist', JSON.stringify(playlist));
+              DeviceEventEmitter.emit('playlistUpdated'); // প্লেলিস্ট পেজকে আপডেট করার সিগন্যাল
+              alert("প্লেলিস্টে সফলভাবে সেভ হয়েছে!");
+          }
+      } catch (error) {
+          alert("সেভ করতে সমস্যা হয়েছে!");
+      }
+  };
 
   const videoPanResponder = useRef(PanResponder.create({
       onStartShouldSetPanResponder: () => false, 
@@ -489,11 +332,15 @@ export default function GlobalPlayer() {
               setTimeout(() => { isZoomingRef.current = false; }, 100);
               return;
           }
+
           if (gestureState.dy > 50 && Math.abs(gestureState.vy) > 0.5) {
               setPlayerState(prev => {
                   if (prev === 'fullscreen') { toggleFullscreen(); return 'mini'; }
                   if (prev === 'full') return 'center'; 
-                  if (prev === 'center') { handleSmartBack(); return 'mini'; }
+                  if (prev === 'center') {
+                      handleSmartBack(); 
+                      return 'mini'; 
+                  }
                   return prev;
               });
           } else if (gestureState.dy < -50 && Math.abs(gestureState.vy) > 0.5) {
@@ -530,11 +377,33 @@ export default function GlobalPlayer() {
     }
   })).current;
 
+  useEffect(() => {
+    const interval = setInterval(async () => {
+        if (!isSlidingRef.current && player) {
+            setCurrentTime(player.currentTime);
+            setDuration(player.duration > 0 ? player.duration : 1);
+        }
+
+        if (streamMode === 'separate') {
+            const audioStatus = await syncAudioRef.current.getStatusAsync();
+            if (audioStatus.isLoaded) {
+                if (player.playing) {
+                    const diff = Math.abs((player.currentTime * 1000) - audioStatus.positionMillis);
+                    if (diff > 500) await syncAudioRef.current.setPositionAsync(player.currentTime * 1000);
+                    if (!audioStatus.isPlaying) await syncAudioRef.current.playAsync();
+                } else {
+                    if (audioStatus.isPlaying) await syncAudioRef.current.pauseAsync().catch(()=>{});
+                }
+            }
+        }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [player, streamMode]);
+
   const closePlayer = async () => {
       setPlayerState('hidden');
       if (isFullscreen) await toggleFullscreen();
       setStreamUrl(null);
-      setVideoSource(null); 
       if (player) player.pause();
       await syncAudioRef.current.unloadAsync().catch(()=>{});
   };
@@ -549,8 +418,6 @@ export default function GlobalPlayer() {
   if (playerState === 'hidden') return null;
   const isInteractiveFull = playerState === 'full' || playerState === 'center' || playerState === 'fullscreen';
 
-  const bufferedWidth = duration > 0 ? `${(buffered / duration) * 100}%` : '0%';
-
   return (
     <Animated.View 
         style={[
@@ -564,41 +431,16 @@ export default function GlobalPlayer() {
     >
       <View style={styles.videoWrapper}>
         
-        {streamUrl && !fallbackData && (
-          <View style={{ flex: 1, width: '100%', height: '100%' }}>
-            
-            <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
-                {videoSource ? (
-                    <VideoView 
-                        key={videoSource} 
-                        ref={videoViewRef} 
-                        player={player} 
-                        style={styles.video} 
-                        contentFit="contain"
-                        nativeControls={false} 
-                    />
-                ) : null}
-            </Animated.View>
-
-            {/* 🚨 ক্র্যাশ ফিক্স ৪: CPU সাশ্রয়ী অপাসিটি ব্যাকগ্রাউন্ড (Blur সরানো হয়েছে) 🚨 */}
-            {isAudioMode && (
-                <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', zIndex: 2, backgroundColor: '#000' }]}>
-                    <Image 
-                        source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
-                        style={[StyleSheet.absoluteFillObject, { opacity: 0.2 }]}
-                        resizeMode="cover"
-                    />
-                    <Ionicons name="headset" size={70} color="#00BFA5" />
-                    <Text style={{ color: '#00BFA5', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>
-                        ব্যাকগ্রাউন্ড অডিও মোড চলছে
-                    </Text>
-                    <Text style={{ color: '#DDD', marginTop: 5, fontSize: 12 }}>
-                        ভিডিও পুরোপুরি বন্ধ আছে (ডাটা সাশ্রয়ী)
-                    </Text>
-                </View>
-            )}
-
-          </View>
+        {streamUrl && !fallbackData && !isAudioMode && (
+          <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
+              <VideoView 
+                ref={videoViewRef} 
+                player={player} 
+                style={styles.video} 
+                contentFit="contain"
+                nativeControls={false} 
+              />
+          </Animated.View>
         )}
 
         {isInteractiveFull && !fallbackData && (
@@ -612,83 +454,69 @@ export default function GlobalPlayer() {
           <View style={styles.controls} pointerEvents="box-none">
              
              <View style={styles.topBar}>
-                 <View style={{flex: 1}} />
+                 <TouchableOpacity style={styles.iconBtn} onPress={handleSmartBack}>
+                    <Ionicons name="chevron-down" size={35} color="#FFF" />
+                 </TouchableOpacity>
                  <TouchableOpacity style={styles.iconBtn} onPress={() => setShowSettingsMenu(true)}>
-                     <Ionicons name="settings-outline" size={28} color="#FFF" />
+                    <Ionicons name="settings-outline" size={28} color="#FFF" />
                  </TouchableOpacity>
              </View>
              
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={async () => {
-                    if (isAudioMode) {
-                        const status = await syncAudioRef.current.getStatusAsync();
-                        if (status.isPlaying) await syncAudioRef.current.pauseAsync();
-                        else await syncAudioRef.current.playAsync();
-                    } else if (player) {
-                        if (player.playing) {
-                            player.pause();
-                            if (streamMode === 'separate') await syncAudioRef.current.pauseAsync().catch(()=>{});
-                        } else {
-                            player.play();
-                            if (streamMode === 'separate') await syncAudioRef.current.playAsync().catch(()=>{});
-                        }
+                    if (player.playing) {
+                        player.pause();
+                        if (streamMode === 'separate') await syncAudioRef.current.pauseAsync().catch(()=>{});
+                    } else {
+                        player.play();
+                        if (streamMode === 'separate') await syncAudioRef.current.playAsync().catch(()=>{});
                     }
                     triggerControls();
                 }}>
-                   <Ionicons name={isPlayingUI ? "pause-circle" : "play-circle"} size={75} color="#FFF" />
+                   <Ionicons name={player.playing ? "pause-circle" : "play-circle"} size={75} color="#FFF" />
                 </TouchableOpacity>
              </View>
 
              <View style={styles.bottomBar}>
-                <Text style={styles.timeTextLeft}>{formatTime(currentTime)}</Text>
+                <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
                 
-                <View style={styles.sliderWrapper}>
-                    <View style={styles.customTrackContainer}>
-                        <View style={[styles.bufferedBar, { width: bufferedWidth }]} />
-                    </View>
-                    <Slider 
-                      style={{ flex: 1, height: 40 }}
-                      minimumValue={0}
-                      maximumValue={duration}
-                      value={currentTime}
-                      onSlidingStart={() => {
-                          isSlidingRef.current = true; 
-                          if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-                      }}
-                      onValueChange={(v) => setCurrentTime(v)} 
-                      onSlidingComplete={async (v) => {
-                          if (isAudioMode) {
-                              await syncAudioRef.current.setPositionAsync(v * 1000);
-                          } else if (player) {
-                              player.currentTime = v; 
-                              if (streamMode === 'separate') await syncAudioWithVideo(v);
-                          }
-                          isSlidingRef.current = false; 
-                          triggerControls();
-                      }}
-                      minimumTrackTintColor="#FF0000"
-                      maximumTrackTintColor="transparent" 
-                      thumbTintColor="#FF0000"
-                    />
-                </View>
-
-                <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
+                <Slider 
+                  style={{flex: 1, height: 40, marginHorizontal: 10}}
+                  minimumValue={0}
+                  maximumValue={duration}
+                  value={currentTime}
+                  onSlidingStart={() => {
+                      isSlidingRef.current = true; 
+                      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+                  }}
+                  onValueChange={(v) => setCurrentTime(v)} 
+                  onSlidingComplete={async (v) => {
+                      player.currentTime = v; 
+                      if (streamMode === 'separate') await syncAudioWithVideo(v);
+                      isSlidingRef.current = false; 
+                      triggerControls();
+                  }}
+                  minimumTrackTintColor="#FF0000"
+                  thumbTintColor="#FF0000"
+                />
+                <Text style={styles.timeText}>{formatTime(duration)}</Text>
                 
-                <TouchableOpacity style={{marginLeft: 10}} onPress={toggleFullscreen}>
+                <TouchableOpacity style={{marginLeft: 15}} onPress={toggleFullscreen}>
                     <Ionicons name={isFullscreen ? "contract" : "expand"} size={24} color="#FFF" />
                 </TouchableOpacity>
              </View>
           </View>
         )}
 
+        {/* 🚨 Settings Menu Modal 🚨 */}
         <Modal visible={showSettingsMenu} transparent animationType="fade">
             <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowSettingsMenu(false)}>
                 <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
                     <Text style={styles.modalTitle}>Player Settings</Text>
                     
-                    <TouchableOpacity style={styles.menuItem} onPress={() => {
+                    <TouchableOpacity style={styles.menuItem} onPress={async () => {
                         setShowSettingsMenu(false);
-                        const ytUrl = `https://www.youtube.com/watch?v=${currentVideoIdRef.current}?app=desktop`; 
+                        const ytUrl = `https://www.youtube.com/watch?v=${currentVideoIdRef.current}?app=desktop`;
                         Linking.openURL(`googlechrome://navigate?url=${ytUrl}`).catch(() => {
                             WebBrowser.openBrowserAsync(ytUrl, { presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN });
                         });
@@ -702,10 +530,8 @@ export default function GlobalPlayer() {
                         <Text style={styles.menuText}>Playback Speed ({currentSpeed}x)</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={styles.menuItem} onPress={() => {
-                        setShowSettingsMenu(false);
-                        alert("Saved to Playlist successfully!");
-                    }}>
+                    {/* 🚨 প্লেলিস্টে সেভ করার বাটন 🚨 */}
+                    <TouchableOpacity style={styles.menuItem} onPress={saveToPlaylist}>
                         <Ionicons name="add-circle-outline" size={20} color="#FFF" style={styles.menuIcon} />
                         <Text style={styles.menuText}>Save to Playlist</Text>
                     </TouchableOpacity>
@@ -721,11 +547,12 @@ export default function GlobalPlayer() {
             </TouchableOpacity>
         </Modal>
 
+        {/* 🚨 Speed Selection Modal 🚨 */}
         <Modal visible={showSpeedMenu} transparent animationType="fade">
             <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowSpeedMenu(false)}>
                 <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
                     <Text style={styles.modalTitle}>Select Speed</Text>
-                    {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map(s => (
+                    {[0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0].map(s => (
                         <TouchableOpacity key={s} style={styles.menuItem} onPress={() => changeSpeed(s)}>
                             <Text style={[styles.menuText, currentSpeed === s && {color: '#FF0000', fontWeight: 'bold'}]}>
                                 {s === 1.0 ? 'Normal (1.0x)' : `${s}x`}
@@ -753,29 +580,9 @@ export default function GlobalPlayer() {
                     setPlayerState('full');
                 }
             }}>
-                <View style={styles.miniControlsRow}>
-                    <TouchableOpacity style={styles.miniCtrlBtn} onPress={async () => {
-                        if (isAudioMode) {
-                            const status = await syncAudioRef.current.getStatusAsync();
-                            if (status.isPlaying) await syncAudioRef.current.pauseAsync();
-                            else await syncAudioRef.current.playAsync();
-                        } else if (player) {
-                            if (player.playing) {
-                                player.pause();
-                                if (streamMode === 'separate') syncAudioRef.current.pauseAsync().catch(()=>{});
-                            } else {
-                                player.play();
-                                if (streamMode === 'separate') syncAudioRef.current.playAsync().catch(()=>{});
-                            }
-                        }
-                    }}>
-                        <Ionicons name={isPlayingUI ? "pause" : "play"} size={22} color="#FFF" />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity onPress={closePlayer} style={styles.miniCtrlBtn}>
-                        <Ionicons name="close" size={24} color="#FFF" />
-                    </TouchableOpacity>
-                </View>
+                <TouchableOpacity onPress={closePlayer} style={styles.miniCloseBtn}>
+                    <Ionicons name="close-circle" size={28} color="#FFF" />
+                </TouchableOpacity>
             </TouchableOpacity>
         )}
       </View>
@@ -785,8 +592,8 @@ export default function GlobalPlayer() {
 
 const styles = StyleSheet.create({
   fullscreenContainer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, backgroundColor: '#000', overflow: 'hidden' }, 
-  fullContainer: { position: 'absolute', top: 55, left: 0, width: PORTRAIT_WIDTH, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000', overflow: 'hidden' },
-  centerContainer: { position: 'absolute', top: 0, left: 0, width: PORTRAIT_WIDTH, height: PORTRAIT_HEIGHT, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  fullContainer: { position: 'absolute', top: 55, left: 0, right: 0, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000', overflow: 'hidden' },
+  centerContainer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
   
   videoWrapper: { flex: 1, justifyContent: 'center', width: '100%', height: '100%' },
@@ -802,14 +609,8 @@ const styles = StyleSheet.create({
   
   centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 },
   bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 20 },
+  timeText: { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
   
-  timeTextLeft: { color: '#FFF', fontSize: 13, fontWeight: 'bold', minWidth: 40, textAlign: 'center' },
-  timeTextRight: { color: '#FFF', fontSize: 13, fontWeight: 'bold', minWidth: 40, textAlign: 'center' },
-  
-  sliderWrapper: { flex: 1, marginHorizontal: 8, justifyContent: 'center', position: 'relative', height: 40 },
-  customTrackContainer: { position: 'absolute', left: Platform.OS === 'android' ? 15 : 0, right: Platform.OS === 'android' ? 15 : 0, height: 3, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, overflow: 'hidden' },
-  bufferedBar: { height: '100%', backgroundColor: 'rgba(144, 238, 144, 0.8)', borderRadius: 2 },
-
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
   settingsMenu: { width: 250, backgroundColor: '#1A1A1A', borderRadius: 15, padding: 15, elevation: 10 },
   modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 10, textAlign: 'center', borderBottomWidth: 1, borderBottomColor: '#333', paddingBottom: 10 },
@@ -821,8 +622,6 @@ const styles = StyleSheet.create({
   fallbackText: { color: '#FFF', textAlign: 'center', marginVertical: 20, fontSize: 16 },
   btn: { backgroundColor: '#FF0000', paddingHorizontal: 25, paddingVertical: 12, borderRadius: 10 },
   btnText: { color: '#FFF', fontWeight: 'bold' },
-  
   miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 },
-  miniControlsRow: { position: 'absolute', top: 5, right: 5, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 15, paddingHorizontal: 5, paddingVertical: 2, alignItems: 'center' },
-  miniCtrlBtn: { padding: 5, marginHorizontal: 3 },
+  miniCloseBtn: { position: 'absolute', top: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 15 },
 });
