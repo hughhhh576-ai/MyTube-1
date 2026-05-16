@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, ImageBackground, Platform } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
 import { Audio } from 'expo-av'; 
 import { Ionicons } from '@expo/vector-icons';
@@ -66,25 +66,15 @@ export default function GlobalPlayer() {
   const isAudioModeRef = useRef(false);
   const streamModeRef = useRef('combined');
   const cachedAudioUrlRef = useRef(null); 
+  
+  // 🚨 CPU সেভার: একই সাথে একাধিক সিঙ্ক কমান্ড যেন না যায় তার জন্য লক 🚨
+  const isSyncingRef = useRef(false);
 
+  // 🚨 ক্র্যাশ ফিক্স ১: এখান থেকে setTimeout পুরোপুরি সরিয়ে দেওয়া হয়েছে 🚨
   const player = useVideoPlayer(videoSource, (p) => {
     if (!videoSource) return; 
     p.loop = false;
     p.playbackRate = currentSpeed; 
-
-    setTimeout(async () => {
-        try {
-            if (resumeTimeRef.current > 0) {
-                p.currentTime = resumeTimeRef.current;
-            }
-            p.play();
-
-            if (streamModeRef.current === 'separate') {
-                await syncAudioRef.current.setPositionAsync(resumeTimeRef.current * 1000).catch(()=>{});
-                await syncAudioRef.current.playAsync().catch(()=>{});
-            }
-        } catch (error) { console.log(error); }
-    }, 800);
   });
 
   const triggerControls = () => {
@@ -295,12 +285,15 @@ export default function GlobalPlayer() {
     };
   }, [isFullscreen, streamUrl]);
 
+  // 🚨 ক্র্যাশ ফিক্স ২: প্লেয়ার শুধু এখান থেকেই রেডি হবে 🚨
   useEffect(() => {
       let timeoutId;
       if (!isAudioMode && videoSource && player) {
           timeoutId = setTimeout(async () => {
               try {
-                  player.currentTime = resumeTimeRef.current;
+                  if (resumeTimeRef.current > 0) {
+                      player.currentTime = resumeTimeRef.current;
+                  }
                   player.play();
 
                   if (streamModeRef.current === 'separate') {
@@ -405,18 +398,25 @@ export default function GlobalPlayer() {
       setShowSettingsMenu(false);
   };
 
+  // 🚨 ক্র্যাশ ফিক্স ৩: CPU সেভার সিঙ্ক অপ্টিমাইজেশন 🚨
   useEffect(() => {
     const interval = setInterval(async () => {
+        if (isSyncingRef.current) return; 
+
         if (isAudioMode) {
-            const audioStatus = await syncAudioRef.current.getStatusAsync();
-            if (audioStatus.isLoaded) {
-                setIsPlayingUI(audioStatus.isPlaying);
-                if (audioStatus.playableDurationMillis) setBuffered(audioStatus.playableDurationMillis / 1000);
-                if (!isSlidingRef.current) {
-                    setCurrentTime(audioStatus.positionMillis / 1000);
-                    if (audioStatus.durationMillis) setDuration(audioStatus.durationMillis / 1000);
+            isSyncingRef.current = true;
+            try {
+                const audioStatus = await syncAudioRef.current.getStatusAsync();
+                if (audioStatus.isLoaded) {
+                    setIsPlayingUI(audioStatus.isPlaying);
+                    if (audioStatus.playableDurationMillis) setBuffered(audioStatus.playableDurationMillis / 1000);
+                    if (!isSlidingRef.current) {
+                        setCurrentTime(audioStatus.positionMillis / 1000);
+                        if (audioStatus.durationMillis) setDuration(audioStatus.durationMillis / 1000);
+                    }
                 }
-            }
+            } catch(e) {}
+            isSyncingRef.current = false;
         } else {
             setIsPlayingUI(player?.playing || false);
             
@@ -429,16 +429,22 @@ export default function GlobalPlayer() {
             }
 
             if (streamMode === 'separate' && videoSource) {
-                const audioStatus = await syncAudioRef.current.getStatusAsync();
-                if (audioStatus.isLoaded) {
-                    if (player && player.playing) {
-                        const diff = Math.abs((player.currentTime * 1000) - audioStatus.positionMillis);
-                        if (diff > 500) await syncAudioRef.current.setPositionAsync(player.currentTime * 1000);
-                        if (!audioStatus.isPlaying) await syncAudioRef.current.playAsync();
-                    } else {
-                        if (audioStatus.isPlaying) await syncAudioRef.current.pauseAsync().catch(()=>{});
+                isSyncingRef.current = true;
+                try {
+                    const audioStatus = await syncAudioRef.current.getStatusAsync();
+                    if (audioStatus.isLoaded) {
+                        if (player && player.playing) {
+                            const diff = Math.abs((player.currentTime * 1000) - audioStatus.positionMillis);
+                            if (diff > 800) { 
+                                await syncAudioRef.current.setPositionAsync(player.currentTime * 1000);
+                            }
+                            if (!audioStatus.isPlaying) await syncAudioRef.current.playAsync();
+                        } else {
+                            if (audioStatus.isPlaying) await syncAudioRef.current.pauseAsync().catch(()=>{});
+                        }
                     }
-                }
+                } catch(e) {}
+                isSyncingRef.current = false;
             }
         }
     }, 1000);
@@ -574,13 +580,14 @@ export default function GlobalPlayer() {
                 ) : null}
             </Animated.View>
 
+            {/* 🚨 ক্র্যাশ ফিক্স ৪: CPU সাশ্রয়ী অপাসিটি ব্যাকগ্রাউন্ড (Blur সরানো হয়েছে) 🚨 */}
             {isAudioMode && (
-                <ImageBackground 
-                    source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
-                    style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', zIndex: 2 }]}
-                    blurRadius={10}
-                >
-                    <View style={{...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)'}} />
+                <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', zIndex: 2, backgroundColor: '#000' }]}>
+                    <Image 
+                        source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
+                        style={[StyleSheet.absoluteFillObject, { opacity: 0.2 }]}
+                        resizeMode="cover"
+                    />
                     <Ionicons name="headset" size={70} color="#00BFA5" />
                     <Text style={{ color: '#00BFA5', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>
                         ব্যাকগ্রাউন্ড অডিও মোড চলছে
@@ -588,7 +595,7 @@ export default function GlobalPlayer() {
                     <Text style={{ color: '#DDD', marginTop: 5, fontSize: 12 }}>
                         ভিডিও পুরোপুরি বন্ধ আছে (ডাটা সাশ্রয়ী)
                     </Text>
-                </ImageBackground>
+                </View>
             )}
 
           </View>
@@ -633,10 +640,8 @@ export default function GlobalPlayer() {
              </View>
 
              <View style={styles.bottomBar}>
-                {/* 🚨 ফিক্স ২: টাইম টেক্সটের জন্য নির্দিষ্ট উইডথ (minWidth) দেওয়া হয়েছে যাতে ওভারল্যাপ না হয় 🚨 */}
                 <Text style={styles.timeTextLeft}>{formatTime(currentTime)}</Text>
                 
-                {/* 🚨 ফিক্স ১: স্লাইডার এবং বাফার বার নিখুঁতভাবে ওভারলে করা হয়েছে 🚨 */}
                 <View style={styles.sliderWrapper}>
                     <View style={styles.customTrackContainer}>
                         <View style={[styles.bufferedBar, { width: bufferedWidth }]} />
@@ -662,12 +667,11 @@ export default function GlobalPlayer() {
                           triggerControls();
                       }}
                       minimumTrackTintColor="#FF0000"
-                      maximumTrackTintColor="transparent" // মূল ট্র্যাক ট্রান্সপারেন্ট করা হয়েছে
+                      maximumTrackTintColor="transparent" 
                       thumbTintColor="#FF0000"
                     />
                 </View>
 
-                {/* 🚨 ফিক্স ২: টাইম টেক্সট ওভারল্যাপ সমাধান 🚨 */}
                 <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
                 
                 <TouchableOpacity style={{marginLeft: 10}} onPress={toggleFullscreen}>
@@ -677,7 +681,6 @@ export default function GlobalPlayer() {
           </View>
         )}
 
-        {/* 🚨 ফিক্স ৩: সম্পূর্ণ সেটিং মেনু পুনরায় যুক্ত করা হয়েছে 🚨 */}
         <Modal visible={showSettingsMenu} transparent animationType="fade">
             <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowSettingsMenu(false)}>
                 <TouchableOpacity activeOpacity={1} style={styles.settingsMenu}>
@@ -699,7 +702,6 @@ export default function GlobalPlayer() {
                         <Text style={styles.menuText}>Playback Speed ({currentSpeed}x)</Text>
                     </TouchableOpacity>
 
-                    {/* পুনরায় যুক্ত করা অপশন */}
                     <TouchableOpacity style={styles.menuItem} onPress={() => {
                         setShowSettingsMenu(false);
                         alert("Saved to Playlist successfully!");
@@ -708,7 +710,6 @@ export default function GlobalPlayer() {
                         <Text style={styles.menuText}>Save to Playlist</Text>
                     </TouchableOpacity>
 
-                    {/* পুনরায় যুক্ত করা অপশন */}
                     <TouchableOpacity style={styles.menuItem} onPress={() => {
                         setShowSettingsMenu(false);
                         Share.share({ message: `Watch this awesome video: https://www.youtube.com/watch?v=${currentVideoIdRef.current}` });
@@ -802,11 +803,9 @@ const styles = StyleSheet.create({
   centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 },
   bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 20 },
   
-  // 🚨 টাইম টেক্সট ফিক্স (Fixed Width) 🚨
   timeTextLeft: { color: '#FFF', fontSize: 13, fontWeight: 'bold', minWidth: 40, textAlign: 'center' },
   timeTextRight: { color: '#FFF', fontSize: 13, fontWeight: 'bold', minWidth: 40, textAlign: 'center' },
   
-  // 🚨 স্লাইডার ও বাফার ডিজাইন ফিক্স 🚨
   sliderWrapper: { flex: 1, marginHorizontal: 8, justifyContent: 'center', position: 'relative', height: 40 },
   customTrackContainer: { position: 'absolute', left: Platform.OS === 'android' ? 15 : 0, right: Platform.OS === 'android' ? 15 : 0, height: 3, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, overflow: 'hidden' },
   bufferedBar: { height: '100%', backgroundColor: 'rgba(144, 238, 144, 0.8)', borderRadius: 2 },
