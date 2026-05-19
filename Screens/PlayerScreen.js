@@ -24,11 +24,18 @@ export default function PlayerScreen({ route, navigation }) {
   const [showDescModal, setShowDescModal] = useState(false);
   const [showCommentModal, setShowCommentModal] = useState(false);
 
+  // Download States
   const [downloadStep, setDownloadStep] = useState('fetching'); 
   const [downloadLinks, setDownloadLinks] = useState([]);
   const [downloadType, setDownloadType] = useState('video'); 
-
   const [isDownloading, setIsDownloading] = useState(false);
+
+  // New States for Live Description & Comments
+  const [description, setDescription] = useState('');
+  const [isDescLoading, setIsDescLoading] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [isCommentsLoading, setIsCommentsLoading] = useState(false);
+
   const [isAudioMode, setIsAudioMode] = useState(videoData?.type === 'audio');
 
   useFocusEffect(
@@ -52,6 +59,10 @@ export default function PlayerScreen({ route, navigation }) {
         setIsAudioMode(videoData?.type === 'audio');
 
         setIsInitialLoading(true);
+        // রিসেট ডাটা
+        setDescription('');
+        setComments([]);
+
         const timer = setTimeout(() => {
             setIsInitialLoading(false);
         }, 3000);
@@ -85,6 +96,67 @@ export default function PlayerScreen({ route, navigation }) {
     const newMode = !isAudioMode;
     setIsAudioMode(newMode);
     DeviceEventEmitter.emit('toggleAudioMode', newMode);
+  };
+
+  // ==========================================
+  // [NEW]: ওয়েব থেকে লাইভ ডিসক্রিপশন আনার লজিক
+  // ==========================================
+  const loadDescription = async () => {
+      setShowDescModal(true);
+      if (description) return; // আগে লোড করা থাকলে আবার করবে না
+      
+      setIsDescLoading(true);
+      try {
+          // সরাসরি ইউটিউব থেকে ডিসক্রিপশন স্ক্র্যাপ করে আনা
+          const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
+          const text = await response.text();
+          const match = text.match(/"shortDescription":"(.*?)"/);
+          
+          if (match && match[1]) {
+              // ইউনিকোড ও নতুন লাইন ফিক্স করা
+              let cleanDesc = match[1].replace(/\\n/g, '\n').replace(/\\u0026/g, '&').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+              setDescription(cleanDesc);
+          } else {
+              setDescription("এই ভিডিওতে কোনো ডিসক্রিপশন দেওয়া হয়নি।");
+          }
+      } catch (error) {
+          setDescription("ইন্টারনেট সমস্যা! ডিসক্রিপশন লোড করা যায়নি।");
+      }
+      setIsDescLoading(false);
+  };
+
+  // ==========================================
+  // [NEW]: ওয়েব থেকে লাইভ কমেন্ট আনার লজিক
+  // ==========================================
+  const loadComments = async () => {
+      setShowCommentModal(true);
+      if (comments.length > 0) return; // আগে লোড করা থাকলে আবার করবে না
+      
+      setIsCommentsLoading(true);
+      try {
+          // একটি ফ্রি ও ফাস্ট পাবলিক API এর মাধ্যমে কমেন্ট আনা হচ্ছে
+          const res = await fetch(`https://yt.lemnoslife.com/noKey/commentThreads?part=snippet&videoId=${videoId}&maxResults=30`);
+          const data = await res.json();
+          
+          if (data && data.items) {
+              const formatted = data.items.map(item => {
+                  const snip = item.snippet.topLevelComment.snippet;
+                  return {
+                      id: item.id,
+                      author: snip.authorDisplayName,
+                      avatar: snip.authorProfileImageUrl,
+                      text: snip.textOriginal,
+                      date: snip.publishedAt
+                  };
+              });
+              setComments(formatted);
+          } else {
+              setComments([]);
+          }
+      } catch (error) {
+          setComments([]);
+      }
+      setIsCommentsLoading(false);
   };
 
   const handleDownloadExecute = async (item) => {
@@ -201,7 +273,6 @@ export default function PlayerScreen({ route, navigation }) {
       });
   };
 
-  // লোগো না পেলে চ্যানেলের নামের অক্ষর দিয়ে ডাইনামিক লোগো তৈরির লজিক
   const safeAvatar = (videoData?.avatar && videoData.avatar.trim() !== '') 
       ? (videoData.avatar.startsWith('//') ? `https:${videoData.avatar}` : videoData.avatar) 
       : `https://ui-avatars.com/api/?name=${encodeURIComponent(videoData?.channel || 'YT')}&background=random&color=fff&size=100`;
@@ -211,15 +282,14 @@ export default function PlayerScreen({ route, navigation }) {
       <Text style={styles.mainTitle}>{videoData?.title}</Text>
       <Text style={styles.mainViews}>{videoData?.views} {videoData?.publishedTime ? `• ${videoData.publishedTime}` : ''}</Text>
 
-      {/* নতুন স্মার্ট অ্যাকশন বাটন প্যানেল (Description, Comments, Audio, Download) */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actionRowContainer}>
           
-          <TouchableOpacity style={styles.actionPill} onPress={() => setShowDescModal(true)}>
+          <TouchableOpacity style={styles.actionPill} onPress={loadDescription}>
               <Ionicons name="document-text-outline" size={18} color="#FFF" />
-              <Text style={styles.actionPillText}>বিবরণ</Text>
+              <Text style={styles.actionPillText}>ডিসক্রিপশন</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionPill} onPress={() => setShowCommentModal(true)}>
+          <TouchableOpacity style={styles.actionPill} onPress={loadComments}>
               <Ionicons name="chatbox-ellipses-outline" size={18} color="#FFF" />
               <Text style={styles.actionPillText}>কমেন্ট</Text>
           </TouchableOpacity>
@@ -322,7 +392,7 @@ export default function PlayerScreen({ route, navigation }) {
       )}
 
       {/* ================================================== */}
-      {/* 1. বিবরণ (Description) Modal */}
+      {/* 1. ডিসক্রিপশন (Description) Modal */}
       {/* ================================================== */}
       <Modal visible={showDescModal} transparent animationType="slide" onRequestClose={() => setShowDescModal(false)}>
         <View style={styles.bottomSheetOverlayFull}>
@@ -330,7 +400,7 @@ export default function PlayerScreen({ route, navigation }) {
           <View style={styles.bottomSheetContentFull}>
             <View style={styles.modalDragIndicator} />
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>বিবরণ (Description)</Text>
+              <Text style={styles.modalTitle}>ডিসক্রিপশন</Text>
               <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setShowDescModal(false)}>
                 <Ionicons name="close" size={20} color="#FFF" />
               </TouchableOpacity>
@@ -342,9 +412,16 @@ export default function PlayerScreen({ route, navigation }) {
                     <Text style={styles.descMetaText}>{videoData?.publishedTime}</Text>
                 </View>
                 <View style={styles.divider} />
-                <Text style={styles.descText}>
-                    এখানে ভিডিওর বিস্তারিত বিবরণ দেখানো হবে। ইউটিউব থেকে সম্পূর্ণ ডাটা নিয়ে আসার পর এই অংশটি স্বয়ংক্রিয়ভাবে আপডেট হয়ে যাবে।
-                </Text>
+                
+                {isDescLoading ? (
+                    <View style={{paddingVertical: 40, alignItems: 'center'}}>
+                        <ActivityIndicator size="large" color="#00BFA5" />
+                        <Text style={{color: '#AAA', marginTop: 15}}>ডিসক্রিপশন লোড হচ্ছে...</Text>
+                    </View>
+                ) : (
+                    <Text style={styles.descText}>{description}</Text>
+                )}
+
             </ScrollView>
           </View>
         </View>
@@ -364,17 +441,41 @@ export default function PlayerScreen({ route, navigation }) {
                 <Ionicons name="close" size={20} color="#FFF" />
               </TouchableOpacity>
             </View>
-            <View style={styles.commentPlaceholder}>
-                <Ionicons name="chatbubbles-outline" size={60} color="#444" />
-                <Text style={styles.commentPlaceholderText}>কমেন্ট সেকশন লোড হচ্ছে...</Text>
-                <Text style={styles.commentPlaceholderSub}>খুব শীঘ্রই এখানে দর্শকদের মন্তব্য দেখা যাবে।</Text>
+
+            <View style={{ flex: 1, marginTop: 5 }}>
+                {isCommentsLoading ? (
+                    <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 50}}>
+                        <ActivityIndicator size="large" color="#00BFA5" />
+                        <Text style={{color: '#AAA', marginTop: 15}}>ওয়েব থেকে কমেন্ট আনা হচ্ছে...</Text>
+                    </View>
+                ) : comments.length > 0 ? (
+                    <FlatList 
+                        data={comments}
+                        keyExtractor={item => item.id}
+                        showsVerticalScrollIndicator={false}
+                        renderItem={({item}) => (
+                            <View style={styles.commentItem}>
+                                <Image source={{uri: item.avatar}} style={styles.commentAvatar} />
+                                <View style={styles.commentTextCol}>
+                                    <Text style={styles.commentAuthor}>{item.author}</Text>
+                                    <Text style={styles.commentText}>{item.text}</Text>
+                                </View>
+                            </View>
+                        )}
+                    />
+                ) : (
+                    <View style={styles.commentPlaceholder}>
+                        <Ionicons name="chatbubble-ellipses-outline" size={60} color="#444" />
+                        <Text style={styles.commentPlaceholderText}>কোনো কমেন্ট পাওয়া যায়নি</Text>
+                    </View>
+                )}
             </View>
           </View>
         </View>
       </Modal>
 
       {/* ================================================== */}
-      {/* 3. 2D Half-Screen Download Modal */}
+      {/* 3. Download Modal */}
       {/* ================================================== */}
       <Modal visible={showDownloadModal} transparent animationType="slide" onRequestClose={() => setShowDownloadModal(false)}>
         <View style={styles.modalOverlay}>
@@ -454,7 +555,6 @@ const styles = StyleSheet.create({
     mainTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 6 },
     mainViews: { color: '#AAA', fontSize: 13, marginBottom: 15 },
     
-    // Action Pills Row
     actionRowContainer: { flexDirection: 'row', alignItems: 'center', paddingBottom: 5 },
     actionPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#262626', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#333' },
     actionPillText: { color: '#FFF', fontSize: 13, fontWeight: '600', marginLeft: 6 },
@@ -482,9 +582,6 @@ const styles = StyleSheet.create({
     recMeta: { color: '#AAA', fontSize: 12, marginTop: 4 },
     recViewsInfo: { color: '#888', fontSize: 11, marginTop: 2 },
     
-    // ==========================================
-    // Full Width Bottom Sheet (For Desc & Comments)
-    // ==========================================
     bottomSheetOverlayFull: { flex: 1, justifyContent: 'flex-end' },
     bottomSheetContentFull: { backgroundColor: '#1E1E1E', borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingHorizontal: 20, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 40 : 20, maxHeight: height * 0.75, minHeight: 400, elevation: 15, shadowColor: '#000', shadowOffset: { width: 0, height: -5 }, shadowOpacity: 0.3, shadowRadius: 10, zIndex: 10 },
     
@@ -495,13 +592,15 @@ const styles = StyleSheet.create({
     descText: { color: '#CCC', fontSize: 14, lineHeight: 22 },
 
     // Comments Styles
-    commentPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 30 },
-    commentPlaceholderText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginTop: 15 },
-    commentPlaceholderSub: { color: '#888', fontSize: 13, marginTop: 5 },
+    commentItem: { flexDirection: 'row', marginBottom: 18, paddingHorizontal: 5 },
+    commentAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 12, backgroundColor: '#333' },
+    commentTextCol: { flex: 1 },
+    commentAuthor: { color: '#AAA', fontSize: 13, fontWeight: 'bold', marginBottom: 4 },
+    commentText: { color: '#FFF', fontSize: 14, lineHeight: 20 },
+    commentPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 30 },
+    commentPlaceholderText: { color: '#AAA', fontSize: 16, marginTop: 15 },
 
-    // ==========================================
-    // Half Screen Modal Styles (For Download)
-    // ==========================================
+    // Download Modal Styles
     modalOverlay: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'flex-end' },
     modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
     modalContent: { width: '50%', backgroundColor: '#1E1E1E', borderTopLeftRadius: 25, borderTopRightRadius: 0, paddingHorizontal: 12, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 40 : 20, maxHeight: height * 0.75, minHeight: 350, elevation: 15, shadowColor: '#000', shadowOffset: { width: -5, height: 0 }, shadowOpacity: 0.3, shadowRadius: 10, zIndex: 10 },
