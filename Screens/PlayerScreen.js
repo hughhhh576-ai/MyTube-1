@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as NavigationBar from 'expo-navigation-bar';
-import { WebView } from 'react-native-webview'; // [NEW]: ব্যাকগ্রাউন্ড কমেন্ট আনার জন্য
+import { WebView } from 'react-native-webview'; 
 
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16; 
@@ -37,6 +37,9 @@ export default function PlayerScreen({ route, navigation }) {
   const [isDescLoading, setIsDescLoading] = useState(false);
   const [comments, setComments] = useState([]);
   const [isCommentsLoading, setIsCommentsLoading] = useState(false);
+  
+  // 🚨 [NEW]: কমেন্ট বাটনে চাপলে তবেই এটি true হবে এবং ওয়েবসাইট লোড হবে 🚨
+  const [loadCommentWebView, setLoadCommentWebView] = useState(false);
 
   const [isAudioMode, setIsAudioMode] = useState(videoData?.type === 'audio');
 
@@ -61,10 +64,12 @@ export default function PlayerScreen({ route, navigation }) {
         setIsAudioMode(videoData?.type === 'audio');
 
         setIsInitialLoading(true);
+        
         // ডাটা রিসেট
         setDescription('');
         setComments([]);
-        setIsCommentsLoading(true);
+        setIsCommentsLoading(false);
+        setLoadCommentWebView(false); // 🚨 নতুন ভিডিও আসলে ওয়েবভিউ পুরোপুরি বন্ধ থাকবে
 
         const timer = setTimeout(() => {
             setIsInitialLoading(false);
@@ -101,14 +106,10 @@ export default function PlayerScreen({ route, navigation }) {
     DeviceEventEmitter.emit('toggleAudioMode', newMode);
   };
 
-  // ==========================================
-  // [MODIFIED]: লিংকে চাপ দিলে Search Setting-এ পাঠানো হবে
-  // ==========================================
   const handleLinkPress = (url) => {
       setShowDescModal(false); 
       
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
-          // এটি searchsettings স্ক্রিনে লিংকটি পাঠিয়ে দেবে
           navigation.navigate('searchsettings', { initialSearch: url });
       } else {
           Linking.openURL(url).catch(err => console.error("URL খুলতে সমস্যা হচ্ছে", err));
@@ -154,9 +155,13 @@ export default function PlayerScreen({ route, navigation }) {
       setIsDescLoading(false);
   };
 
+  // 🚨 [MODIFIED]: কমেন্ট বাটনে চাপ দিলেই শুধুমাত্র ওয়েবভিউ লোড হবে 🚨
   const loadComments = () => {
       setShowCommentModal(true);
-      // ব্যাকগ্রাউন্ড ওয়েবভিউ অটোমেটিক কমেন্ট লোড করছে।
+      if (comments.length === 0 && !loadCommentWebView) {
+          setIsCommentsLoading(true);
+          setLoadCommentWebView(true); // ওয়েবসাইট লোডিং শুরু হলো
+      }
   };
 
   const handleDownloadExecute = async (item) => {
@@ -325,7 +330,6 @@ export default function PlayerScreen({ route, navigation }) {
     </View>
   );
 
-  // 🚨 ওয়েবভিউ থেকে স্ক্র্যাপ করা কমেন্ট রিসিভ করার লজিক
   const handleWebViewMessage = (event) => {
       try {
           const parsed = JSON.parse(event.nativeEvent.data);
@@ -338,14 +342,20 @@ export default function PlayerScreen({ route, navigation }) {
       } catch (e) {}
   };
 
-  // 🚨 ইনজেক্টেড জাভাস্ক্রিপ্ট (ব্যাকগ্রাউন্ডে পেজ স্ক্রল করে কমেন্ট বের করবে)
+  // 🚨 [MODIFIED]: ডাটা বাঁচানোর জন্য ভিডিও প্লেয়ার ধ্বংস করার স্ক্রিপ্ট যুক্ত করা হয়েছে 🚨
   const INJECTED_JS = `
     try {
-        // ভিডিওটি মিউট করে দেওয়া হচ্ছে যাতে ব্যাকগ্রাউন্ড সাউন্ড না আসে
-        setInterval(function() {
+        // ভিডিও প্লেয়ারকে পুরোপুরি ধ্বংস করে দেওয়া হচ্ছে যাতে ডাটা না কাটে
+        var stopVideo = function() {
             var v = document.querySelector('video');
-            if(v) { v.muted = true; v.pause(); }
-        }, 500);
+            if(v) { 
+                v.pause(); 
+                v.removeAttribute('src'); 
+                v.load(); 
+            }
+        };
+        stopVideo();
+        setInterval(stopVideo, 500);
 
         var attempt = 0;
         var scrapeInterval = setInterval(function() {
@@ -378,8 +388,8 @@ export default function PlayerScreen({ route, navigation }) {
     <SafeAreaView style={styles.container}>
       <StatusBar hidden={true} /> 
       
-      {/* 🚨 Hidden WebView (শুধু কমেন্ট স্ক্র্যাপ করার জন্য) 🚨 */}
-      {videoId && !videoData.localUri && (
+      {/* 🚨 [MODIFIED]: loadCommentWebView True হলে তবেই এই ওয়েবসাইটটি লোড হবে 🚨 */}
+      {loadCommentWebView && videoId && !videoData.localUri && (
           <View style={{ width: 0, height: 0, opacity: 0, overflow: 'hidden' }}>
               <WebView
                   source={{ uri: `https://www.youtube.com/watch?v=${videoId}` }}
@@ -451,9 +461,7 @@ export default function PlayerScreen({ route, navigation }) {
           />
       )}
 
-      {/* ================================================== */}
-      {/* 1. ডিসক্রিপশন Modal (Clickable Links) */}
-      {/* ================================================== */}
+      {/* 1. ডিসক্রিপশন Modal */}
       <Modal visible={showDescModal} transparent animationType="slide" onRequestClose={() => setShowDescModal(false)}>
         <View style={styles.bottomSheetOverlayFull}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowDescModal(false)} />
@@ -488,9 +496,7 @@ export default function PlayerScreen({ route, navigation }) {
         </View>
       </Modal>
 
-      {/* ================================================== */}
       {/* 2. কমেন্টস Modal */}
-      {/* ================================================== */}
       <Modal visible={showCommentModal} transparent animationType="slide" onRequestClose={() => setShowCommentModal(false)}>
         <View style={styles.bottomSheetOverlayFull}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowCommentModal(false)} />
@@ -507,7 +513,7 @@ export default function PlayerScreen({ route, navigation }) {
                 {isCommentsLoading ? (
                     <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 50}}>
                         <ActivityIndicator size="large" color="#00BFA5" />
-                        <Text style={{color: '#AAA', marginTop: 15}}>ওয়েবভিউ থেকে কমেন্ট লোড হচ্ছে...</Text>
+                        <Text style={{color: '#AAA', marginTop: 15}}>কমেন্ট লোড হচ্ছে...</Text>
                     </View>
                 ) : comments.length > 0 ? (
                     <FlatList 
@@ -535,9 +541,7 @@ export default function PlayerScreen({ route, navigation }) {
         </View>
       </Modal>
 
-      {/* ================================================== */}
       {/* 3. Download Modal */}
-      {/* ================================================== */}
       <Modal visible={showDownloadModal} transparent animationType="slide" onRequestClose={() => setShowDownloadModal(false)}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowDownloadModal(false)} />
