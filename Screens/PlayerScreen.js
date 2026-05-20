@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as NavigationBar from 'expo-navigation-bar';
+import * as Clipboard from 'expo-clipboard'; // 🎯 লিংক কপি করার জন্য এক্সপো ক্লিপবোর্ড ইম্পোর্ট
 
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16; 
@@ -115,41 +116,72 @@ export default function PlayerScreen({ route, navigation }) {
     DeviceEventEmitter.emit('toggleAudioMode', newMode);
   };
 
-  // 🎯 🚀 [FIXED]: সার্ভার ড্রাইভেন ইউআরএল রেজোলিউশন লজিক (মাখনের মতো লোড হবে)
+  // 🎯 🚀 [UPDATED]: লিংক প্রেস হ্যান্ডলার (ভিডিও ও চ্যানেল হ্যান্ডলিং ফিক্স)
   const handleLinkPress = async (url) => {
-      setShowDescModal(false); 
-      setIsLinkLoading(true); // ফুল স্ক্রিন লোডার ওপেন
-      
-      try {
-          // পুরো লিংকটি সরাসরি সার্ভারের কাছে পাঠিয়ে দেওয়া হলো
-          const response = await fetch(`${MY_API_SERVER}/api/resolve-url?url=${encodeURIComponent(url)}`);
-          const data = await response.json();
+      const cleanUrl = url.replace(/\s/g, ''); 
+      const videoIdMatch = cleanUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/|.*embed\/|watch\s*\?v=))([^&?\s]{11})/);
+
+      // ১. ভিডিও লিংক রেন্ডারার
+      if (videoIdMatch && videoIdMatch[1]) {
+          setShowDescModal(false); 
+          setIsLinkLoading(true); 
           
-          if (data.success && data.videoData) {
+          try {
+              const response = await fetch(`${MY_API_SERVER}/api/resolve-url?url=${encodeURIComponent(cleanUrl)}`);
+              const data = await response.json();
               setIsLinkLoading(false);
-              // গ্লোবাল ভিডিও ও প্লেয়ার স্ক্রিনকে হোম স্ক্রিনের মতোই ট্র্রিগার করে একসাথে লোড করা হচ্ছে
-              navigation.push('Player', { videoId: data.videoData.id, videoData: data.videoData });
-          } else {
+              if (data.success && data.videoData) {
+                  navigation.push('Player', { videoId: data.videoData.id, videoData: data.videoData });
+              } else {
+                  navigation.navigate('searchsettings', { initialSearch: videoIdMatch[1] });
+              }
+          } catch (e) {
               setIsLinkLoading(false);
-              // ইউটিউব লিংক না হলে সাধারণ ব্রাউজারে ওপেন করবে
-              Linking.openURL(url.replace(/\s/g, '')).catch(err => console.error(err));
+              navigation.navigate('searchsettings', { initialSearch: videoIdMatch[1] });
           }
-      } catch (e) {
-          setIsLinkLoading(false);
-          Alert.alert("Connection Error", "Could not connect to MyTube server.");
+          return;
       }
+
+      // ২. 🎯 চ্যানেল ইউআরএল ফিল্টার (@username, /channel/, /c/, /user/)
+      const channelMatch = cleanUrl.match(/(?:youtube\.com\/(?:@|channel\/|c\/|user\/))([^\s/?#]+)/);
+      if (channelMatch) {
+          setShowDescModal(false);
+          const chName = channelMatch[1];
+          // ব্রাউজারে না পাঠিয়ে সরাসরি অ্যাপের নেটিভ চ্যানেল স্ক্রিনে ওপেন হবে
+          navigation.navigate('Channel', { 
+              channelName: chName, 
+              channelAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(chName)}&background=random&color=fff&size=100`,
+              channelUrl: `/${chName}`
+          });
+          return;
+      }
+
+      // ৩. সাধারণ এক্সটার্নাল লিংক
+      Linking.openURL(cleanUrl).catch(err => console.error(err));
+  };
+
+  // 🎯 [NEW]: লিংক লং-প্রেস কপি করার হ্যান্ডলার
+  const handleLinkLongPress = async (url) => {
+      const cleanUrl = url.replace(/\s/g, '');
+      await Clipboard.setStringAsync(cleanUrl);
+      Alert.alert("Success", "Link copied to clipboard!");
   };
 
   const renderDescriptionWithLinks = (text) => {
       if (!text) return null;
-      // স্পেস হ্যান্ডলিং রেজেক্স
       const urlRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)[^\s]*\s*\?v=[^\s]+|https?:\/\/[^\s]+)/g;
       const parts = text.split(urlRegex);
 
       return parts.map((part, index) => {
           if (part.match(urlRegex)) {
               return (
-                  <Text key={index} style={styles.clickableLink} onPress={() => handleLinkPress(part)}>
+                  // 🎯 ক্লিকেবল এবং লং-প্রেস কপি অপশন দুটোই যুক্ত করা হলো
+                  <Text 
+                    key={index} 
+                    style={styles.clickableLink} 
+                    onPress={() => handleLinkPress(part)}
+                    onLongPress={() => handleLinkLongPress(part)}
+                  >
                       {part.replace(/\s/g, '')}
                   </Text>
               );
@@ -371,7 +403,6 @@ export default function PlayerScreen({ route, navigation }) {
     <SafeAreaView style={styles.container}>
       <StatusBar hidden={true} /> 
 
-      {/* 🚀 সার্ভার থ্রু লোডিং ওভারলে স্ক্রিন */}
       {isLinkLoading && (
         <View style={styles.linkLoadingOverlay}>
             <ActivityIndicator size="large" color="#00BFA5" />
