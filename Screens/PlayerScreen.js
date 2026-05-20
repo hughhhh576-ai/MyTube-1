@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, ScrollView, Modal, Alert, Platform, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -29,15 +29,15 @@ export default function PlayerScreen({ route, navigation }) {
   const [downloadType, setDownloadType] = useState('video'); 
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // Live Description & Comments States
+  // 🚀 Live Data States (Server Fetched)
+  const [liveAvatar, setLiveAvatar] = useState(null);
   const [description, setDescription] = useState('');
-  const [isDescLoading, setIsDescLoading] = useState(false);
+  
+  // Comments States
   const [comments, setComments] = useState([]);
   const [isCommentsLoading, setIsCommentsLoading] = useState(false);
   const [commentNextToken, setCommentNextToken] = useState(null);
   const [isMoreCommentsLoading, setIsMoreCommentsLoading] = useState(false);
-  
-  // Replies State
   const [commentReplies, setCommentReplies] = useState({}); 
   const [loadingReplyId, setLoadingReplyId] = useState(null);
 
@@ -64,11 +64,22 @@ export default function PlayerScreen({ route, navigation }) {
         setIsAudioMode(videoData?.type === 'audio');
         setIsInitialLoading(true);
 
+        // Reset Data
+        setLiveAvatar(null);
         setDescription('');
         setComments([]);
         setCommentReplies({});
         setCommentNextToken(null);
-        setIsCommentsLoading(false);
+
+        // 🚀 ব্যাকগ্রাউন্ডে সার্ভার থেকে মিসিং চ্যানেল লোগো ও ডিসক্রিপশন আনা হচ্ছে
+        fetch(`${MY_API_SERVER}/api/video-details?videoId=${videoId}`)
+            .then(res => res.json())
+            .then(data => {
+                if(data.success) {
+                    if(data.avatar) setLiveAvatar(data.avatar);
+                    if(data.description) setDescription(data.description);
+                }
+            }).catch(err => console.log(err));
 
         const timer = setTimeout(() => {
             setIsInitialLoading(false);
@@ -92,7 +103,7 @@ export default function PlayerScreen({ route, navigation }) {
       subs = subs ? JSON.parse(subs) : [];
       const exists = subs.some(s => s.name === videoData.channel);
       if (exists) subs = subs.filter(s => s.name !== videoData.channel);
-      else subs.push({ id: Date.now().toString(), name: videoData.channel, avatar: videoData.avatar });
+      else subs.push({ id: Date.now().toString(), name: videoData.channel, avatar: displayAvatar });
 
       await AsyncStorage.setItem('subscribedChannels', JSON.stringify(subs));
       setIsSubscribed(!exists);
@@ -131,26 +142,8 @@ export default function PlayerScreen({ route, navigation }) {
       });
   };
 
-  const loadDescription = async () => {
-      setShowDescModal(true);
-      if (description) return; 
-
-      setIsDescLoading(true);
-      try {
-          const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
-          const text = await response.text();
-          const match = text.match(/"shortDescription":"(.*?)"/);
-
-          if (match && match[1]) {
-              let cleanDesc = match[1].replace(/\\n/g, '\n').replace(/\\u0026/g, '&').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-              setDescription(cleanDesc);
-          } else {
-              setDescription("No description available.");
-          }
-      } catch (error) {
-          setDescription("Network error.");
-      }
-      setIsDescLoading(false);
+  const loadDescription = () => {
+      setShowDescModal(true); 
   };
 
   const loadComments = async () => {
@@ -329,15 +322,16 @@ export default function PlayerScreen({ route, navigation }) {
       });
   };
 
-  const safeAvatar = (videoData?.avatar && videoData.avatar.trim() !== '') 
-      ? (videoData.avatar.startsWith('//') ? `https:${videoData.avatar}` : videoData.avatar) 
-      : `https://ui-avatars.com/api/?name=${encodeURIComponent(videoData?.channel || 'YT')}&background=random&color=fff&size=100`;
+  const displayAvatar = liveAvatar 
+      || (videoData?.avatar && videoData.avatar.trim() !== '' ? (videoData.avatar.startsWith('//') ? `https:${videoData.avatar}` : videoData.avatar) : null) 
+      || `https://ui-avatars.com/api/?name=${encodeURIComponent(videoData?.channel || 'YT')}&background=random&color=fff&size=100`;
 
   const renderHeader = () => (
     <View style={styles.detailsContainer}>
       <Text style={styles.mainTitle}>{videoData?.title}</Text>
       <Text style={styles.mainViews}>{videoData?.views} {videoData?.publishedTime ? `• ${videoData.publishedTime}` : ''}</Text>
 
+      {/* 🎯 এখানে একশন বাটনগুলোর ব্যাকগ্রাউন্ড লেয়ার রিমুভ করা হয়েছে */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actionRowContainer}>
           <TouchableOpacity style={styles.actionPill} onPress={loadDescription}>
               <Ionicons name="document-text-outline" size={18} color="#FFF" />
@@ -349,9 +343,9 @@ export default function PlayerScreen({ route, navigation }) {
               <Text style={styles.actionPillText}>Comments</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.actionPill, isAudioMode && {backgroundColor: '#00BFA5', borderColor: '#00BFA5'}]} onPress={handleBackgroundPlay}>
-              <Ionicons name={isAudioMode ? "headset" : "headset-outline"} size={18} color="#FFF" />
-              <Text style={styles.actionPillText}>Audio</Text>
+          <TouchableOpacity style={styles.actionPill} onPress={handleBackgroundPlay}>
+              <Ionicons name={isAudioMode ? "headset" : "headset-outline"} size={18} color={isAudioMode ? "#00BFA5" : "#FFF"} />
+              <Text style={[styles.actionPillText, isAudioMode && {color: '#00BFA5'}]}>Audio</Text>
           </TouchableOpacity>
 
           {!videoData.localUri && (
@@ -365,8 +359,8 @@ export default function PlayerScreen({ route, navigation }) {
       <View style={styles.divider} />
 
       <View style={styles.channelRow}>
-        <TouchableOpacity style={styles.channelLeft} onPress={() => navigation.navigate('Channel', { channelName: videoData.channel, channelAvatar: safeAvatar })}>
-          <Image source={{ uri: safeAvatar }} style={styles.channelAvatar} />
+        <TouchableOpacity style={styles.channelLeft} onPress={() => navigateToChannel(videoData.channel, displayAvatar, null)}>
+          <Image source={{ uri: displayAvatar }} style={styles.channelAvatar} />
           <View style={styles.channelTextCol}>
             <Text style={styles.channelName} numberOfLines={1}>{videoData.channel}</Text>
             <Text style={styles.subCount}>{videoData.localUri ? 'Offline Storage' : 'YouTube Channel'}</Text>
@@ -464,7 +458,7 @@ export default function PlayerScreen({ route, navigation }) {
                     <Text style={styles.descMetaText}>{videoData?.publishedTime}</Text>
                 </View>
                 <View style={styles.divider} />
-                {isDescLoading ? (
+                {!description ? (
                     <View style={{paddingVertical: 40, alignItems: 'center'}}>
                         <ActivityIndicator size="large" color="#00BFA5" />
                         <Text style={{color: '#AAA', marginTop: 15}}>Loading Description...</Text>
@@ -641,7 +635,8 @@ const styles = StyleSheet.create({
     mainViews: { color: '#AAA', fontSize: 13, marginBottom: 15 },
 
     actionRowContainer: { flexDirection: 'row', alignItems: 'center', paddingBottom: 5 },
-    actionPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#262626', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#333' },
+    // 🎯 এখানে বাটনগুলোর ব্যাকগ্রাউন্ড, বর্ডার ও গোল শেপ সম্পূর্ণ রিমুভ করা হয়েছে
+    actionPill: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, marginRight: 20 },
     actionPillText: { color: '#FFF', fontSize: 13, fontWeight: '600', marginLeft: 6 },
 
     divider: { height: 1, backgroundColor: '#222', marginVertical: 15 },
