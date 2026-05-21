@@ -76,7 +76,7 @@ export default function ChannelScreen() {
           if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i], currentTitle: newTitle });
         }
       } else if (node && typeof node === 'object') {
-        
+
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
@@ -85,12 +85,12 @@ export default function ChannelScreen() {
         if (hasVideoId && !seenIds.has(node.videoId)) {
           seenIds.add(node.videoId);
           const vId = node.videoId;
-          
+
           const duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
           const publishedTime = node.publishedTimeText?.simpleText || node.publishedTimeText?.runs?.[0]?.text || '';
           const views = node.viewCountText?.simpleText || node.viewCountText?.runs?.[0]?.text || '';
           const isLive = JSON.stringify(node).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
-          
+
           const thumbnailUrl = thumbQuality === 'Data Saver' 
               ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
               : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
@@ -146,11 +146,11 @@ export default function ChannelScreen() {
 
       if (bannerSources && Array.isArray(bannerSources) && bannerSources.length > 0) {
         let tempUrl = bannerSources[bannerSources.length - 1].url; 
-        
+
         if (tempUrl.startsWith('//')) {
             tempUrl = 'https:' + tempUrl;
         }
-        
+
         url = tempUrl;
         return;
       }
@@ -260,7 +260,7 @@ export default function ChannelScreen() {
             const homeRes = await fetch(`https://www.youtube.com${extractedChannelUrl}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
             const homeHtml = await homeRes.text();
             homeData = parseYtData(homeHtml);
-            
+
             if (homeData) {
                if (!parsedVideosData) parsedVideosData = homeData; 
                extractDataIteratively(homeData, categorizedData, 'Videos');
@@ -497,7 +497,7 @@ export default function ChannelScreen() {
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{channelName}</Text>
       </View>
-      
+
       <FlatList 
         key={activeTab === 'Shorts' ? 'list-shorts-grid' : 'list-videos'} 
         data={tabData[activeTab] || []} 
@@ -522,10 +522,10 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', height: 50, paddingHorizontal: 10 },
   headerIcon: { padding: 10 },
   headerTitle: { flex: 1, color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 5 },
-  
+
   bannerContainer: { width: width, height: width * 0.25, backgroundColor: '#222', position: 'relative' },
   bannerImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  
+
   channelProfileSection: { flexDirection: 'row', padding: 15, alignItems: 'center' },
   avatarWrapper: { marginRight: 15 },
   channelLogoLarge: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#333' },
@@ -542,7 +542,7 @@ const styles = StyleSheet.create({
   activeTabButton: { borderBottomWidth: 2, borderBottomColor: '#FFF' },
   tabText: { color: '#AAA', fontSize: 15, fontWeight: '500' },
   activeTabText: { color: '#FFF', fontWeight: 'bold' },
-  
+
   vidmateCard: { flexDirection: 'row', padding: 12, borderBottomWidth: 1, borderBottomColor: '#1A1A1A', backgroundColor: '#0F0F0F' },
   thumbnailWrapper: { width: 150, height: 85, borderRadius: 8, overflow: 'hidden', backgroundColor: '#222', position: 'relative' },
   vidmateThumbnail: { width: '100%', height: '100%', resizeMode: 'cover' },
