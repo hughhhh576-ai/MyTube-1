@@ -58,7 +58,7 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 স্মার্ট স্ক্যানার (টাইটেল ফিক্স এবং টার্মিনাল লগিং সহ অতি-সুরক্ষিত)
+  // 🧠 স্মার্ট স্ক্যানার (YouTube-এর নতুন API ViewModel সাপোর্ট সহ)
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     try {
       const stack = [{ node: rootNode, currentTitle: 'Unknown Title' }];
@@ -68,11 +68,20 @@ export default function ChannelScreen() {
         const { node, currentTitle } = stack.pop();
 
         let newTitle = currentTitle;
+        
         if (node && typeof node === 'object') {
-          if (node.title?.runs?.[0]?.text) newTitle = node.title.runs[0].text;
-          else if (node.title?.simpleText) newTitle = node.title.simpleText;
-          else if (node.headline?.runs?.[0]?.text) newTitle = node.headline.runs[0].text;
-          else if (node.headline?.simpleText) newTitle = node.headline.simpleText;
+          // 🎯 YouTube এর নতুন ViewModel আর্কিটেকচার অনুযায়ী টাইটেল খোঁজা
+          let possibleTitle = node.title?.runs?.[0]?.text || 
+                              node.title?.simpleText || 
+                              node.headline?.runs?.[0]?.text || 
+                              node.headline?.simpleText ||
+                              node.title?.content || 
+                              node.metadata?.lockupMetadataViewModel?.title?.content || // নতুন ভিডিওর জন্য
+                              node.overlayMetadata?.primaryText?.content; // নতুন শর্টসের জন্য
+
+          if (possibleTitle && typeof possibleTitle === 'string') {
+              newTitle = possibleTitle;
+          }
         }
 
         if (Array.isArray(node)) {
@@ -90,17 +99,18 @@ export default function ChannelScreen() {
             seenIds.add(node.videoId);
             const vId = node.videoId;
 
-            // 🎯 সরাসরি ভিডিও নোড থেকে টাইটেল খোঁজার জোরদার চেষ্টা
+            // 🎯 নির্দিষ্ট ভিডিও নোড থেকে টাইটেল বের করা
             let exactTitle = node.title?.runs?.[0]?.text || 
                              node.title?.simpleText || 
                              node.headline?.runs?.[0]?.text || 
                              node.headline?.simpleText || 
+                             node.title?.content ||
                              newTitle;
 
-            // ⚠️ যদি এরপরও টাইটেল না পাওয়া যায়, তবে টার্মিনালে সতর্কবার্তা দেখাবে
+            // ⚠️ টার্মিনাল লগিং
             if (!exactTitle || exactTitle === 'Unknown Title') {
                console.warn(`⚠️ [MyTube Warning]: Title not found for video ID - ${vId}. Defaulting to 'Unknown Title'.`);
-               exactTitle = 'Unknown Title'; // অ্যাপ যেন ক্র্যাশ না করে
+               exactTitle = 'Unknown Title'; 
             }
 
             const duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
