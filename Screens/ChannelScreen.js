@@ -24,6 +24,7 @@ export default function ChannelScreen() {
   const [isLoadingMore, setIsLoadingMore] = useState(false); 
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLiveChannel, setIsLiveChannel] = useState(false); 
+  const [liveVideoData, setLiveVideoData] = useState(null);
   const [thumbQuality, setThumbQuality] = useState('High');
   const [subscriberCount, setSubscriberCount] = useState('N/A');
 
@@ -32,11 +33,11 @@ export default function ChannelScreen() {
   const [shortToken, setShortToken] = useState(null);
   const [apiKey, setApiKey] = useState(null);
 
+  // 🎯 ব্যানার এবং লোগো লোডিংয়ের স্টেট
   const [channelBanner, setChannelBanner] = useState(null);
   const [isBannerLoaded, setIsBannerLoaded] = useState(false);
 
   useEffect(() => {
-    console.log(`\n[MyTube] Fetching Channel: ${channelName}`);
     fetchChannelData();
   }, [channelName]);
 
@@ -51,161 +52,144 @@ export default function ChannelScreen() {
         const quality = await AsyncStorage.getItem('thumbnailQuality');
         if (quality) setThumbQuality(quality);
       } catch (e) {
-         console.error("[MyTube Error] Error loading globals from AsyncStorage:", e);
+        console.error("❌ [MyTube Error] AsyncStorage লোড করতে সমস্যা:", e.message);
       }
     };
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 আল্ট্রা-স্মার্ট স্ক্যানার: এটি ব্লকের ভেতর থেকে যেকোনো গভীরতায় টাইটেল খুঁজে আনবে
+  // 🧠 স্মার্ট স্ক্যানার (টাইটেল ফিক্স এবং টার্মিনাল লগিং সহ অতি-সুরক্ষিত)
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
-    const stack = [rootNode];
-    const seenIds = new Set();
-    let videoCount = 0;
+    try {
+      const stack = [{ node: rootNode, currentTitle: 'Unknown Title' }];
+      const seenIds = new Set();
 
-    while (stack.length > 0) {
-      const node = stack.pop();
+      while (stack.length > 0) {
+        const { node, currentTitle } = stack.pop();
 
-      if (!node || typeof node !== 'object') continue;
+        let newTitle = currentTitle;
+        if (node && typeof node === 'object') {
+          if (node.title?.runs?.[0]?.text) newTitle = node.title.runs[0].text;
+          else if (node.title?.simpleText) newTitle = node.title.simpleText;
+          else if (node.headline?.runs?.[0]?.text) newTitle = node.headline.runs[0].text;
+          else if (node.headline?.simpleText) newTitle = node.headline.simpleText;
+        }
 
-      // Continuation Token (Load More এর জন্য)
-      if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
-        const token = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
-        categorizedData[`${tabType}Token`] = token;
-        console.log(`[MyTube Scanner] Found Continuation Token for ${tabType}`);
-      }
+        if (Array.isArray(node)) {
+          for (let i = 0; i < node.length; i++) {
+            if (node[i] && typeof node[i] === 'object') stack.push({ node: node[i], currentTitle: newTitle });
+          }
+        } else if (node && typeof node === 'object') {
 
-      // YouTube-এর রেন্ডারার ব্লক চেক করা
-      const renderer = node.videoRenderer || node.gridVideoRenderer || node.reelItemRenderer || node.compactVideoRenderer || node.richItemRenderer?.content?.videoRenderer;
-
-      if (renderer && renderer.videoId) {
-        const vId = renderer.videoId;
-
-        if (!seenIds.has(vId)) {
-          seenIds.add(vId);
-
-          // 🎯 ডিপ-সার্চ হেল্পার ফাংশন: এটি রেন্ডারারের ভেতরে যেখানেই টাইটেল থাকুক না কেন খুঁজে আনবে
-          const findTextDeeply = (obj, key1, key2) => {
-             let foundText = null;
-             const search = (innerObj) => {
-                 if (foundText) return;
-                 if (!innerObj || typeof innerObj !== 'object') return;
-                 
-                 if (innerObj[key1]?.runs) foundText = innerObj[key1].runs.map(r => r.text).join('');
-                 else if (innerObj[key1]?.simpleText) foundText = innerObj[key1].simpleText;
-                 else if (innerObj[key2]?.runs) foundText = innerObj[key2].runs.map(r => r.text).join('');
-                 else if (innerObj[key2]?.simpleText) foundText = innerObj[key2].simpleText;
-                 
-                 if (!foundText) Object.values(innerObj).forEach(search);
-             };
-             search(obj);
-             return foundText;
-          };
-
-          // টাইটেল, ডিউরেশন, ভিউ ইত্যাদি এক্সট্রাক্ট করা
-          let extractedTitle = findTextDeeply(renderer, 'title', 'headline');
-          const duration = findTextDeeply(renderer, 'lengthText', 'durationText') || '';
-          const publishedTime = findTextDeeply(renderer, 'publishedTimeText', 'timeText') || '';
-          const views = findTextDeeply(renderer, 'viewCountText', 'shortViewCountText') || '';
-          const isLive = JSON.stringify(renderer).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
-
-          // যদি টাইটেল না পাওয়া যায়, টার্মিনালে ওয়ার্নিং দেখাবে
-          if (!extractedTitle) {
-              console.warn(`[MyTube Warning] Missing Title for Video ID: ${vId}. Setting as Unknown.`);
-              extractedTitle = "Unknown Title"; 
+          if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
+            categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
           }
 
-          // থাম্বনেইল এক্সট্রাক্ট করা (যদি ব্লকের ভেতরে থাকে, না থাকলে ডিফল্ট)
-          let thumbnailUrl = thumbQuality === 'Data Saver' 
-              ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
-              : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
-          
-          if (renderer.thumbnail?.thumbnails?.length > 0) {
-              thumbnailUrl = renderer.thumbnail.thumbnails[renderer.thumbnail.thumbnails.length - 1].url;
+          const hasVideoId = !!node.videoId;
+          if (hasVideoId && !seenIds.has(node.videoId)) {
+            seenIds.add(node.videoId);
+            const vId = node.videoId;
+
+            // 🎯 সরাসরি ভিডিও নোড থেকে টাইটেল খোঁজার জোরদার চেষ্টা
+            let exactTitle = node.title?.runs?.[0]?.text || 
+                             node.title?.simpleText || 
+                             node.headline?.runs?.[0]?.text || 
+                             node.headline?.simpleText || 
+                             newTitle;
+
+            // ⚠️ যদি এরপরও টাইটেল না পাওয়া যায়, তবে টার্মিনালে সতর্কবার্তা দেখাবে
+            if (!exactTitle || exactTitle === 'Unknown Title') {
+               console.warn(`⚠️ [MyTube Warning]: Title not found for video ID - ${vId}. Defaulting to 'Unknown Title'.`);
+               exactTitle = 'Unknown Title'; // অ্যাপ যেন ক্র্যাশ না করে
+            }
+
+            const duration = node.lengthText?.simpleText || node.lengthText?.runs?.[0]?.text || '';
+            const publishedTime = node.publishedTimeText?.simpleText || node.publishedTimeText?.runs?.[0]?.text || '';
+            const views = node.viewCountText?.simpleText || node.viewCountText?.runs?.[0]?.text || '';
+            const isLive = JSON.stringify(node).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
+
+            const thumbnailUrl = thumbQuality === 'Data Saver' 
+                ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
+                : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
+
+            const videoUrl = tabType === 'Shorts' 
+                ? `https://www.youtube.com/shorts/${vId}` 
+                : `https://www.youtube.com/watch?v=${vId}`;
+
+            categorizedData[tabType].unshift({
+              id: String(vId),
+              title: String(exactTitle),
+              value: videoUrl,
+              channel: channelName,
+              avatar: channelAvatar, 
+              duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
+              publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
+              views: views,
+              thumbnail: thumbnailUrl,
+              isLive: isLive
+            });
           }
 
-          const videoUrl = tabType === 'Shorts' 
-              ? `https://www.youtube.com/shorts/${vId}` 
-              : `https://www.youtube.com/watch?v=${vId}`;
-
-          categorizedData[tabType].push({
-            id: String(vId),
-            title: String(extractedTitle),
-            value: videoUrl,
-            channel: channelName,
-            avatar: channelAvatar,
-            duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
-            publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
-            views: views,
-            thumbnail: thumbnailUrl,
-            isLive: isLive
-          });
-
-          videoCount++;
-        }
-        continue; // একটি ভিডিও ব্লক প্রসেস হয়ে গেলে এর ভেতরের অন্য কিছু খোঁজার দরকার নেই
-      }
-
-      // Child node গুলোকে Stack-এ যুক্ত করা
-      if (Array.isArray(node)) {
-        for (let i = 0; i < node.length; i++) {
-          if (node[i] && typeof node[i] === 'object') stack.push(node[i]);
-        }
-      } else {
-        const values = Object.values(node);
-        for (let i = 0; i < values.length; i++) {
-          if (values[i] && typeof values[i] === 'object') stack.push(values[i]);
+          const values = Object.values(node);
+          for (let i = 0; i < values.length; i++) {
+            if (values[i] && typeof values[i] === 'object') stack.push({ node: values[i], currentTitle: newTitle });
+          }
         }
       }
-    }
-    if(videoCount > 0) {
-       console.log(`[MyTube Scanner] Successfully extracted ${videoCount} items for ${tabType}`);
+    } catch (error) {
+      console.error(`❌ [MyTube Error] extractDataIteratively (${tabType}) তে সমস্যা:`, error.message);
     }
   };
 
   const parseYtData = (html) => {
-    let match = html.match(/ytInitialData\s*=\s*({.+?});/) || 
-                html.match(/var ytInitialData\s*=\s*(.*?);<\/script>/) ||
-                html.match(/window\["ytInitialData"\]\s*=\s*({.+?});/);
-    if (match && match[1]) {
-      try { 
-          return JSON.parse(match[1]); 
-      } catch(e) { 
-          console.error("[MyTube Error] Failed to parse YouTube Initial Data JSON:", e.message);
-          return null; 
+    try {
+      let match = html.match(/ytInitialData\s*=\s*({.+?});/) || 
+                  html.match(/var ytInitialData\s*=\s*(.*?);<\/script>/) ||
+                  html.match(/window\["ytInitialData"\]\s*=\s*({.+?});/);
+      if (match && match[1]) {
+        return JSON.parse(match[1]); 
       }
+    } catch(e) { 
+      console.error("❌ [MyTube Error] JSON Data Parse করতে সমস্যা:", e.message);
     }
-    console.warn("[MyTube Warning] No ytInitialData found in HTML.");
     return null;
   };
 
+  // 🎯 ব্যানার লিংক খোঁজার শক্তিশালী ডিপ-স্ক্যানার
   const findBannerUrl = (data) => {
     let url = null;
-    const search = (obj) => {
-      if (url) return;
-      if (!obj || typeof obj !== 'object') return;
+    try {
+      const search = (obj) => {
+        if (url) return;
+        if (!obj || typeof obj !== 'object') return;
 
-      const bannerSources = obj.tvBanner?.thumbnails || 
-                            obj.mobileBanner?.thumbnails || 
-                            obj.banner?.thumbnails || 
-                            obj.imageBannerViewModel?.image?.sources ||
-                            obj.pageHeaderBannerImageViewModel?.image?.sources;
+        const bannerSources = obj.tvBanner?.thumbnails || 
+                              obj.mobileBanner?.thumbnails || 
+                              obj.banner?.thumbnails || 
+                              obj.imageBannerViewModel?.image?.sources ||
+                              obj.pageHeaderBannerImageViewModel?.image?.sources;
 
-      if (bannerSources && Array.isArray(bannerSources) && bannerSources.length > 0) {
-        let tempUrl = bannerSources[bannerSources.length - 1].url; 
-        if (tempUrl.startsWith('//')) tempUrl = 'https:' + tempUrl;
-        url = tempUrl;
-        return;
-      }
+        if (bannerSources && Array.isArray(bannerSources) && bannerSources.length > 0) {
+          let tempUrl = bannerSources[bannerSources.length - 1].url; 
 
-      Object.values(obj).forEach(search);
-    };
-    search(data);
+          if (tempUrl.startsWith('//')) {
+              tempUrl = 'https:' + tempUrl;
+          }
+
+          url = tempUrl;
+          return;
+        }
+
+        Object.values(obj).forEach(search);
+      };
+      search(data);
+    } catch (e) {
+      console.warn("⚠️ [MyTube Warning] Banner URL খুঁজতে গিয়ে সমস্যা:", e.message);
+    }
     return url;
   };
 
   const reFetchInitialViaApi = async (currentApiKey, vEndpoint, sEndpoint) => {
-    console.log("[MyTube API] Fetching Tabs via InnerTube API...");
     try {
         const fetchTabViaApi = async (endpoint, tabName) => {
             if (!endpoint || !endpoint.browseId) return null;
@@ -240,18 +224,18 @@ export default function ChannelScreen() {
         if (apiShorts && apiShorts.ShortsToken) setShortToken(apiShorts.ShortsToken);
 
     } catch (error) {
-        console.error("[MyTube Error] Fetching InnerTube Initial API Failed:", error.message);
+      console.error("❌ [MyTube Error] API দিয়ে রি-ফেচ করতে সমস্যা:", error.message);
     }
   };
 
   const fetchChannelData = async () => {
     setLoading(true);
-    console.log("[MyTube] Starting Channel Data Extraction...");
+    console.log(`📡 [MyTube Info] Fetching data for channel: ${channelName}`);
     try {
       let extractedChannelUrl = paramChannelUrl || channelData?.channelUrl || null;
 
       if (!extractedChannelUrl) {
-          console.log("[MyTube] URL not provided. Searching channel by name...");
+          console.log(`🔍 [MyTube Info] Channel URL পাওয়া যায়নি, সার্চ করে খোঁজা হচ্ছে...`);
           const searchResponse = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
           const searchHtml = await searchResponse.text();
           const searchData = parseYtData(searchHtml);
@@ -274,12 +258,13 @@ export default function ChannelScreen() {
       }
 
       if (!extractedChannelUrl) {
-        console.error("[MyTube Error] Could not find channel URL from search.");
+        console.error("❌ [MyTube Error] কোনোভাবেই Channel URL পাওয়া গেল না!");
         setLoading(false);
         return; 
       }
 
-      console.log(`[MyTube] Found Channel URL: ${extractedChannelUrl}`);
+      console.log(`✅ [MyTube Info] Target Channel URL: ${extractedChannelUrl}`);
+
       let targetVideosUrl = `https://www.youtube.com${extractedChannelUrl}/videos`;
       let targetShortsUrl = `https://www.youtube.com${extractedChannelUrl}/shorts`;
 
@@ -294,7 +279,7 @@ export default function ChannelScreen() {
       const apiMatch = videosHtml.match(/"INNERTUBE_API_KEY":"(.*?)"/);
       if (apiMatch && apiMatch[1]) {
           setApiKey(apiMatch[1]);
-          console.log(`[MyTube] Extracted API Key: ${apiMatch[1].substring(0, 10)}...`);
+          console.log(`🔑 [MyTube Info] API Key পাওয়া গেছে.`);
       }
 
       let parsedVideosData = parseYtData(videosHtml);
@@ -307,8 +292,8 @@ export default function ChannelScreen() {
       if (parsedShortsData) extractDataIteratively(parsedShortsData, categorizedData, 'Shorts');
 
       if (categorizedData.Videos.length === 0 && categorizedData.Shorts.length === 0) {
-         console.warn("[MyTube Warning] No videos found in sub-tabs, checking Home tab.");
          try {
+            console.log(`⚠️ [MyTube Warning] Videos/Shorts ট্যাবে ডাটা নেই, Home ট্যাব থেকে চেষ্টা করা হচ্ছে...`);
             const homeRes = await fetch(`https://www.youtube.com${extractedChannelUrl}`, { headers: { 'User-Agent': DESKTOP_AGENT } });
             const homeHtml = await homeRes.text();
             homeData = parseYtData(homeHtml);
@@ -318,7 +303,7 @@ export default function ChannelScreen() {
                extractDataIteratively(homeData, categorizedData, 'Videos');
             }
          } catch (err) {
-            console.error("[MyTube Error] Failed fetching Home Tab data:", err.message);
+            console.error("❌ [MyTube Error] Home ট্যাব থেকে ডাটা আনতেও সমস্যা:", err.message);
          }
       }
 
@@ -329,6 +314,7 @@ export default function ChannelScreen() {
       setShortToken(categorizedData.ShortsToken);
 
       setTabData({ Videos: categorizedData.Videos, Shorts: categorizedData.Shorts });
+      console.log(`✅ [MyTube Info] Total Videos: ${categorizedData.Videos.length}, Total Shorts: ${categorizedData.Shorts.length}`);
 
       let extractedBanner = null;
       if (parsedVideosData) extractedBanner = findBannerUrl(parsedVideosData);
@@ -337,7 +323,6 @@ export default function ChannelScreen() {
 
       if (extractedBanner) {
         setChannelBanner(extractedBanner);
-        console.log("[MyTube] Banner Extracted Successfully.");
       }
 
       if (parsedVideosData) {
@@ -372,10 +357,9 @@ export default function ChannelScreen() {
       }
 
     } catch (error) {
-        console.error("[MyTube Fatal Error] Error in fetchChannelData:", error.message);
+      console.error("❌ [MyTube Fatal Error] fetchChannelData সম্পূর্ণ ফেইল করেছে:", error.message);
     } finally { 
-        setLoading(false); 
-        console.log("[MyTube] Loading Complete.");
+      setLoading(false); 
     }
   };
 
@@ -383,8 +367,9 @@ export default function ChannelScreen() {
     const currentToken = activeTab === 'Videos' ? videoToken : shortToken;
     if (!currentToken || isLoadingMore || !apiKey) return;
 
-    console.log(`[MyTube] Fetching More Data for ${activeTab}...`);
     setIsLoadingMore(true);
+    console.log(`📡 [MyTube Info] Pagination: আরও ${activeTab} লোড করা হচ্ছে...`);
+    
     try {
       const response = await fetch(`https://www.youtube.com/youtubei/v1/browse?key=${apiKey}`, {
         method: 'POST',
@@ -397,26 +382,28 @@ export default function ChannelScreen() {
       const responseText = await response.text();
       let data;
       try { 
-          data = JSON.parse(responseText); 
+        data = JSON.parse(responseText); 
       } catch (err) { 
-          console.error("[MyTube Error] Failed to parse Load More JSON:", err.message);
-          setIsLoadingMore(false); 
-          return; 
+        console.error("❌ [MyTube Error] Pagination JSON Parse ফেইল করেছে:", err.message);
+        setIsLoadingMore(false); 
+        return; 
       }
 
       const newData = { Videos: [], Shorts: [], VideosToken: null, ShortsToken: null };
       extractDataIteratively(data, newData, activeTab);
 
       const filteredNewItems = newData[activeTab].filter(newObj => !tabData[activeTab].some(existingObj => existingObj.id === newObj.id));
+      
       setTabData(prev => ({ ...prev, [activeTab]: [...prev[activeTab], ...filteredNewItems] }));
+      console.log(`✅ [MyTube Info] আরও ${filteredNewItems.length} টি ${activeTab} যুক্ত করা হলো।`);
 
       if (activeTab === 'Videos') setVideoToken(newData.VideosToken || null);
       else setShortToken(newData.ShortsToken || null);
 
     } catch (error) {
-        console.error("[MyTube Error] Fetching more data failed:", error.message);
+      console.error("❌ [MyTube Error] fetchMoreData (Pagination) ফেইল করেছে:", error.message);
     } finally { 
-        setIsLoadingMore(false); 
+      setIsLoadingMore(false); 
     }
   };
 
@@ -434,7 +421,7 @@ export default function ChannelScreen() {
       }
       await AsyncStorage.setItem('subscribedChannels', JSON.stringify(parsedSubs));
     } catch(e) {
-      console.error("[MyTube Error] Failed to toggle subscription:", e.message);
+      console.error("❌ [MyTube Error] Subscription টগল করতে সমস্যা:", e.message);
     }
   };
 
