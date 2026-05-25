@@ -56,121 +56,141 @@ export default function ChannelScreen() {
     if (isFocused) loadGlobals();
   }, [channelName, isFocused]);
 
-  // 🧠 টার্গেটেড স্ক্যানার (ফেইক ট্র্যাকিং লিংক ইগনোর করবে, শুধু আসল ভিডিও ধরবে)
+  // 🧠 আল্ট্রা-স্মার্ট স্ক্যানার (HomeScreen লজিক ব্যবহার করে)
   const extractDataIteratively = (rootNode, categorizedData, tabType) => {
     try {
-      const stack = [rootNode];
-      const seenIds = new Set();
+      const extractNodes = (node) => {
+        if (Array.isArray(node)) {
+          node.forEach(extractNodes);
+          return;
+        }
+        if (!node || typeof node !== 'object') return;
 
-      while (stack.length > 0) {
-        const node = stack.pop();
-
-        if (!node || typeof node !== 'object') continue;
-
+        // Pagination token
         if (node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token) {
           categorizedData[`${tabType}Token`] = node.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
         }
 
-        // 🎯 শুধু এই নির্দিষ্ট অবজেক্টগুলোতেই ইউটিউব আসল ডাটা রাখে
-        const renderer = node.videoRenderer || 
-                         node.gridVideoRenderer || 
-                         node.compactVideoRenderer || 
-                         node.reelItemRenderer || 
-                         node.shortsLockupViewModel || 
-                         node.lockupViewModel;
+        // 🎯 1. HomeScreen এর মতো নির্দিষ্ট Renderer অবজেক্ট খোঁজা
+        let videoData = null;
+        let isShort = tabType === 'Shorts';
 
-        if (renderer) {
-           let vId = renderer.videoId || renderer.contentId;
-           
-           if (vId && !seenIds.has(vId)) {
-              seenIds.add(vId);
+        if (node.gridVideoRenderer) videoData = node.gridVideoRenderer;
+        else if (node.videoRenderer) videoData = node.videoRenderer;
+        else if (node.reelItemRenderer) { videoData = node.reelItemRenderer; isShort = true; }
+        else if (node.richItemRenderer?.content?.videoRenderer) videoData = node.richItemRenderer.content.videoRenderer;
+        else if (node.richItemRenderer?.content?.reelItemRenderer) { videoData = node.richItemRenderer.content.reelItemRenderer; isShort = true; }
+        else if (node.richItemRenderer?.content?.shortsLockupViewModel) { videoData = node.richItemRenderer.content.shortsLockupViewModel; isShort = true; }
+        else if (node.richItemRenderer?.content?.lockupViewModel) videoData = node.richItemRenderer.content.lockupViewModel;
+        else if (node.lockupViewModel) videoData = node.lockupViewModel;
+        else if (node.shortsLockupViewModel) { videoData = node.shortsLockupViewModel; isShort = true; }
 
-              // 🎯 টাইটেল বের করা
-              let exactTitle = renderer.title?.runs?.[0]?.text || 
-                               renderer.title?.simpleText || 
-                               renderer.headline?.runs?.[0]?.text || 
-                               renderer.headline?.simpleText || 
-                               renderer.title?.content || 
-                               renderer.metadata?.lockupMetadataViewModel?.title?.content ||
-                               renderer.overlayMetadata?.primaryText?.content ||
-                               'Unknown Title';
+        if (videoData) {
+            let vId = videoData.videoId || 
+                      videoData.contentId || 
+                      (videoData.entityId && videoData.entityId.startsWith('shorts-') ? videoData.entityId.replace('shorts-', '') : null);
 
-              // 🎯 ডিউরেশন বের করা
-              let duration = renderer.lengthText?.simpleText || 
-                             renderer.lengthText?.runs?.[0]?.text || 
-                             renderer.contentImage?.thumbnailViewModel?.overlays?.[0]?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText || 
-                             '';
+            if (vId) {
+                const targetList = categorizedData[isShort ? 'Shorts' : 'Videos'];
+                
+                // ডুপ্লিকেট চেক
+                if (!targetList.some(v => v.id === vId)) {
+                    
+                    let exactTitle = videoData.title?.runs?.[0]?.text || 
+                                     videoData.title?.simpleText || 
+                                     videoData.headline?.runs?.[0]?.text || 
+                                     videoData.headline?.simpleText || 
+                                     videoData.title?.content || 
+                                     videoData.metadata?.lockupMetadataViewModel?.title?.content ||
+                                     videoData.overlayMetadata?.primaryText?.content ||
+                                     'Unknown Title';
 
-              if (!duration && renderer.thumbnailOverlays) {
-                 const timeOverlay = renderer.thumbnailOverlays.find(o => o.thumbnailOverlayTimeStatusRenderer);
-                 if (timeOverlay) duration = timeOverlay.thumbnailOverlayTimeStatusRenderer.text?.simpleText || '';
-              }
+                    let duration = videoData.lengthText?.simpleText || 
+                                   videoData.lengthText?.runs?.[0]?.text || 
+                                   videoData.contentImage?.thumbnailViewModel?.overlays?.[0]?.thumbnailOverlayTimeStatusRenderer?.text?.simpleText || 
+                                   '';
+                                   
+                    if (!duration && videoData.thumbnailOverlays) {
+                        const timeOverlay = videoData.thumbnailOverlays.find(o => o.thumbnailOverlayTimeStatusRenderer);
+                        if (timeOverlay) duration = timeOverlay.thumbnailOverlayTimeStatusRenderer.text?.simpleText || '';
+                    }
 
-              // 🎯 ভিউজ এবং সময় বের করা
-              let views = renderer.viewCountText?.simpleText || 
-                          renderer.viewCountText?.runs?.[0]?.text || 
-                          renderer.shortViewCountText?.simpleText || 
-                          renderer.shortViewCountText?.runs?.[0]?.text || 
-                          renderer.overlayMetadata?.secondaryText?.content ||
-                          '';
-                          
-              let publishedTime = renderer.publishedTimeText?.simpleText || 
-                                  renderer.publishedTimeText?.runs?.[0]?.text || 
-                                  '';
+                    let views = videoData.viewCountText?.simpleText || 
+                                videoData.viewCountText?.runs?.[0]?.text || 
+                                videoData.shortViewCountText?.simpleText || 
+                                videoData.shortViewCountText?.runs?.[0]?.text || 
+                                videoData.overlayMetadata?.secondaryText?.content ||
+                                '';
+                                
+                    let publishedTime = videoData.publishedTimeText?.simpleText || 
+                                        videoData.publishedTimeText?.runs?.[0]?.text || 
+                                        '';
 
-              // নতুন ডিজাইনের ডাটা ব্রেকডাউন ("15K views • 2 days ago")
-              const metaContent = renderer.metadata?.lockupMetadataViewModel?.metadata?.content;
-              if (metaContent && typeof metaContent === 'string') {
-                 const parts = metaContent.split('•').map(p => p.trim());
-                 if (parts.length > 1) {
-                   if (!views) views = parts[0]; 
-                   if (!publishedTime) publishedTime = parts[1]; 
-                 } else if (parts.length === 1) {
-                   if (parts[0].toLowerCase().includes('view') || parts[0].includes('ভিজ্যুয়াল')) {
-                      if (!views) views = parts[0];
-                   } else {
-                      if (!publishedTime) publishedTime = parts[0];
-                   }
-                 }
-              }
+                    // নতুন মেটাডাটা ("15K views • 2 days ago") ফিল্টার
+                    const metaContent = videoData.metadata?.lockupMetadataViewModel?.metadata?.content;
+                    if (metaContent && typeof metaContent === 'string') {
+                        const parts = metaContent.split('•').map(p => p.trim());
+                        if (parts.length > 1) {
+                            if (!views) views = parts[0]; 
+                            if (!publishedTime) publishedTime = parts[1]; 
+                        } else if (parts.length === 1) {
+                            if (parts[0].toLowerCase().includes('view') || parts[0].includes('ভিজ্যুয়াল')) {
+                                if (!views) views = parts[0];
+                            } else {
+                                if (!publishedTime) publishedTime = parts[0];
+                            }
+                        }
+                    }
 
-              let isLive = JSON.stringify(renderer).includes('"BADGE_STYLE_TYPE_LIVE_NOW"') || (metaContent && metaContent.includes('watching'));
+                    // ফলব্যাক ভিডিও ইনফো
+                    if (!views || !publishedTime) {
+                        const vInfo = videoData.videoInfo?.runs || videoData.subtitle?.runs || [];
+                        const combinedText = vInfo.map(r => r.text).join('').trim();
+                        if (combinedText) {
+                            const parts = combinedText.split('•').map(p => p.trim());
+                            if (parts.length > 1) {
+                                if (!views) views = parts[0];
+                                if (!publishedTime) publishedTime = parts[1];
+                            }
+                        }
+                    }
 
-              const thumbnailUrl = thumbQuality === 'Data Saver' 
-                   ? `https://i.ytimg.com/vi/${vId}/mqdefault.jpg` 
-                   : `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
+                    let isLive = JSON.stringify(videoData).includes('"BADGE_STYLE_TYPE_LIVE_NOW"') || (metaContent && metaContent.includes('watching'));
 
-              const videoUrl = tabType === 'Shorts' 
-                   ? `https://www.youtube.com/shorts/${vId}` 
-                   : `https://www.youtube.com/watch?v=${vId}`;
+                    let thumbUrl = `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
+                    const tmb = videoData.thumbnail?.thumbnails || videoData.contentImage?.thumbnailViewModel?.image?.sources;
+                    if (thumbQuality !== 'Data Saver' && tmb && tmb.length > 0) {
+                        thumbUrl = tmb[tmb.length - 1].url;
+                        if (thumbUrl.startsWith('//')) thumbUrl = 'https:' + thumbUrl;
+                    } else if (thumbQuality === 'Data Saver') {
+                        thumbUrl = `https://i.ytimg.com/vi/${vId}/mqdefault.jpg`;
+                    }
 
-              categorizedData[tabType].push({
-                 id: String(vId),
-                 title: String(exactTitle),
-                 value: videoUrl,
-                 channel: channelName,
-                 avatar: channelAvatar, 
-                 duration: duration || (tabType === 'Shorts' ? 'Short' : ''),
-                 publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
-                 views: views,
-                 thumbnail: thumbnailUrl,
-                 isLive: isLive
-              });
-           }
+                    const videoUrl = isShort ? `https://www.youtube.com/shorts/${vId}` : `https://www.youtube.com/watch?v=${vId}`;
+
+                    targetList.push({
+                        id: String(vId),
+                        title: String(exactTitle),
+                        value: videoUrl,
+                        channel: channelName,
+                        avatar: channelAvatar, 
+                        duration: duration || (isShort ? 'Short' : ''),
+                        publishedTime: publishedTime || (isLive ? 'Live Now' : ''),
+                        views: views,
+                        thumbnail: thumbUrl,
+                        isLive: isLive
+                    });
+                }
+            }
+            return; // 🎯 আসল ভিডিও কার্ড পাওয়ার পর ভেতরের ফেক কমান্ডগুলো স্ক্যান করা বন্ধ! (The Magic Fix)
         }
 
-        // ভেতরের অবজেক্ট স্ক্যান করার জন্য স্ট্যাকে পুশ
-        if (Array.isArray(node)) {
-          for (let i = 0; i < node.length; i++) {
-            if (node[i] && typeof node[i] === 'object') stack.push(node[i]);
-          }
-        } else {
-          const values = Object.values(node);
-          for (let i = 0; i < values.length; i++) {
-            if (values[i] && typeof values[i] === 'object') stack.push(values[i]);
-          }
-        }
-      }
+        // যদি ভিডিও কার্ড না হয়, তবে ভেতরের ডাটা স্ক্যান করবে
+        Object.values(node).forEach(extractNodes);
+      };
+
+      extractNodes(rootNode);
+
     } catch (error) {
       console.error(`❌ [MyTube Error] extractDataIteratively (${tabType}) তে সমস্যা:`, error.message);
     }
