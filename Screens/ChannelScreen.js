@@ -667,4 +667,4 @@ const styles = StyleSheet.create({
 
   emptyStateContainer: { padding: 40, alignItems: 'center', justifyContent: 'center' },
   emptyStateText: { color: '#AAA', fontSize: 16, fontWeight: '500' }
-});
+})
