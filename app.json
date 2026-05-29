@@ -54,8 +54,14 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "*.youtube.com" },
-            { "scheme": "https", "host": "youtu.be" }
+            {
+              "scheme": "https",
+              "host": "*.youtube.com"
+            },
+            {
+              "scheme": "https",
+              "host": "youtu.be"
+            }
           ],
           "category": [
             "BROWSABLE",
@@ -86,7 +92,9 @@
             "targetSdkVersion": 36
           }
         }
-      ]
+      ],
+      "expo-web-browser",
+      "expo-audio"
     ]
   }
 }
