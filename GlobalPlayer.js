@@ -9,7 +9,7 @@ import Slider from '@react-native-community/slider';
 import * as ScreenOrientation from 'expo-screen-orientation'; 
 import * as WebBrowser from 'expo-web-browser'; 
 
-LogBox.ignoreLogs(['[expo-av]', 'Video component from `expo-av`']);
+// Removed expo-av references to avoid crashes. Implement video player using react-native-video or a custom native module (background playback handled by react-native-track-player) here.
 
 const windowDim = Dimensions.get('window');
 const PORTRAIT_WIDTH = Math.min(windowDim.width, windowDim.height);
