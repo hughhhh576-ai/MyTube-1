@@ -8,7 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import Slider from '@react-native-community/slider';
 import * as ScreenOrientation from 'expo-screen-orientation'; 
 import * as WebBrowser from 'expo-web-browser'; 
-import AsyncStorage from '@react-native-async-storage/async-storage'; // 🚨 Playlist Save ফিক্স করার জন্য ইম্পোর্ট করা হলো
+import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
 LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video']);
 
@@ -21,6 +21,41 @@ const MINI_WIDTH = PORTRAIT_WIDTH * 0.45;
 const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
+
+// 🚨 [FIX] Getter-Only এরর সমাধানের জন্য সেফটি ফাংশন তৈরি করা হলো 🚨
+const safeSeek = (p, targetSec) => {
+    if (!p) return;
+    try {
+        if (typeof p.seekTo === 'function') p.seekTo(targetSec);
+        else if (typeof p.seekBy === 'function') p.seekBy(targetSec - p.currentTime);
+        else p.currentTime = targetSec; 
+    } catch (e) {}
+};
+
+const safeSetRate = (p, rate) => {
+    if (!p) return;
+    try {
+        if (typeof p.setPlaybackRate === 'function') p.setPlaybackRate(rate);
+        else if (typeof p.setRate === 'function') p.setRate(rate);
+        else p.playbackRate = rate;
+    } catch (e) {}
+};
+
+const safeSetVolume = (p, vol) => {
+    if (!p) return;
+    try {
+        if (typeof p.setVolume === 'function') p.setVolume(vol);
+        else p.volume = vol;
+    } catch(e) {}
+};
+
+const safeSetMuted = (p, isMuted) => {
+    if (!p) return;
+    try {
+        if (typeof p.setMuted === 'function') p.setMuted(isMuted);
+        else p.muted = isMuted;
+    } catch(e) {}
+};
 
 export default function GlobalPlayer() {
   const navigation = useNavigation();
@@ -70,7 +105,7 @@ export default function GlobalPlayer() {
   const cachedAudioUrlRef = useRef(null); 
   
   const isSyncingRef = useRef(false);
-  const pendingSeekRef = useRef(null); // 🚨 ব্যাকগ্রাউন্ড অডিও পজিশন ফিক্স
+  const pendingSeekRef = useRef(null); 
 
   useEffect(() => {
     const setupAudio = async () => {
@@ -95,9 +130,11 @@ export default function GlobalPlayer() {
 
   const player = useVideoPlayer(videoSource, (p) => {
     if (!videoSource) return; 
-    p.loop = false;
-    p.playbackRate = currentSpeed;
-    if (streamModeRef.current === 'separate') p.muted = true; 
+    try { p.loop = false; } catch(e) {}
+    safeSetRate(p, currentSpeed); // 🚨 Getter এরর সলভড
+    if (streamModeRef.current === 'separate') {
+        safeSetMuted(p, true); // 🚨 Getter এরর সলভড
+    }
   });
 
   const triggerControls = () => {
@@ -197,11 +234,11 @@ export default function GlobalPlayer() {
       setCurrentTime(newTime); 
       try {
           if (isAudioModeRef.current) {
-              if (syncAudioRef.current) syncAudioRef.current.currentTime = newTime;
+              safeSeek(syncAudioRef.current, newTime); // 🚨 Getter এরর সলভড
           } else {
-              if (player) player.currentTime = newTime; 
+              safeSeek(player, newTime); // 🚨 Getter এরর সলভড
               if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-                  syncAudioRef.current.currentTime = newTime;
+                  safeSeek(syncAudioRef.current, newTime); 
               }
           }
       } catch (error) { console.log("Seek Error: ", error); }
@@ -269,8 +306,8 @@ export default function GlobalPlayer() {
               if (audioUrlToPlay) {
                   safeReleaseAudio();
                   syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
-                  pendingSeekRef.current = resumeTimeRef.current; // 🚨 অডিও লোড হওয়ার পর সঠিক পজিশনে যাওয়ার কমান্ড
-                  syncAudioRef.current.playbackRate = currentSpeed;
+                  pendingSeekRef.current = resumeTimeRef.current; 
+                  safeSetRate(syncAudioRef.current, currentSpeed); // 🚨 Getter এরর সলভড
                   syncAudioRef.current.play();
               }
           }
@@ -303,15 +340,15 @@ export default function GlobalPlayer() {
           timeoutId = setTimeout(async () => {
               try {
                   if (resumeTimeRef.current > 0) {
-                      player.currentTime = resumeTimeRef.current;
+                      safeSeek(player, resumeTimeRef.current); // 🚨 Getter এরর সলভড
                   }
                   player.play();
 
                   if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-                      syncAudioRef.current.currentTime = resumeTimeRef.current;
+                      safeSeek(syncAudioRef.current, resumeTimeRef.current); // 🚨 Getter এরর সলভড
                       syncAudioRef.current.play();
                   }
-              } catch (e) { console.log("Resume Error: ", e); }
+              } catch (e) {}
           }, 800); 
       }
       return () => clearTimeout(timeoutId);
@@ -353,8 +390,8 @@ export default function GlobalPlayer() {
     if (json.audioUrl && streamModeRef.current === 'separate') {
         safeReleaseAudio();
         syncAudioRef.current = createAudioPlayer(json.audioUrl);
-        syncAudioRef.current.volume = 1.0;
-        syncAudioRef.current.playbackRate = currentSpeed;
+        safeSetVolume(syncAudioRef.current, 1.0); // 🚨 Getter এরর সলভড
+        safeSetRate(syncAudioRef.current, currentSpeed); // 🚨 Getter এরর সলভড
         syncAudioRef.current.play();
     }
   };
@@ -393,8 +430,8 @@ export default function GlobalPlayer() {
 
   const changeSpeed = async (speed) => {
       setCurrentSpeed(speed);
-      if (player) player.playbackRate = speed;
-      if (syncAudioRef.current) syncAudioRef.current.playbackRate = speed;
+      safeSetRate(player, speed); // 🚨 Getter এরর সলভড
+      safeSetRate(syncAudioRef.current, speed); // 🚨 Getter এরর সলভড
       setShowSpeedMenu(false);
       setShowSettingsMenu(false);
   };
@@ -411,7 +448,7 @@ export default function GlobalPlayer() {
                     setIsPlayingUI(syncAudioRef.current.playing);
 
                     if (pendingSeekRef.current !== null) {
-                        syncAudioRef.current.currentTime = pendingSeekRef.current;
+                        safeSeek(syncAudioRef.current, pendingSeekRef.current); // 🚨 Getter এরর সলভড
                         setCurrentTime(pendingSeekRef.current);
                         pendingSeekRef.current = null;
                     } else if (!isSlidingRef.current) {
@@ -438,9 +475,8 @@ export default function GlobalPlayer() {
                     if (isAudioReady) {
                         if (player && player.playing) {
                             const diff = Math.abs(player.currentTime - syncAudioRef.current.currentTime);
-                            // 🚨 অডিও সাইলেন্ট হওয়ার বাগ ফিক্স: ১.৫ সেকেন্ডের বেশি পার্থক্য হলেই কেবল সিঙ্ক করবে 
                             if (diff > 1.5) { 
-                                syncAudioRef.current.currentTime = player.currentTime;
+                                safeSeek(syncAudioRef.current, player.currentTime); // 🚨 Getter এরর সলভড
                             }
                             if (!syncAudioRef.current.playing) syncAudioRef.current.play();
                         } else {
@@ -666,7 +702,6 @@ export default function GlobalPlayer() {
 
                 <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
                 
-                {/* 🚨 Settings বাটনটি এখন নিচে চলে এসেছে */}
                 <TouchableOpacity style={{marginLeft: 12}} onPress={() => setShowSettingsMenu(true)}>
                     <Ionicons name="settings-outline" size={22} color="#FFF" />
                 </TouchableOpacity>
@@ -699,7 +734,6 @@ export default function GlobalPlayer() {
                         <Text style={styles.menuText}>Playback Speed ({currentSpeed}x)</Text>
                     </TouchableOpacity>
 
-                    {/* 🚨 Save to Playlist ফুল লজিক */}
                     <TouchableOpacity style={styles.menuItem} onPress={async () => {
                         setShowSettingsMenu(false);
                         if (!videoData || !currentVideoIdRef.current) return;
