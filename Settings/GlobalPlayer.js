@@ -819,4 +819,4 @@ const styles = StyleSheet.create({
   miniTouchableArea: { flex: 1, width: '100%', height: '100%', position: 'absolute', zIndex: 50 },
   miniControlsRow: { position: 'absolute', top: 5, right: 5, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 15, paddingHorizontal: 5, paddingVertical: 2, alignItems: 'center' },
   miniCtrlBtn: { padding: 5, marginHorizontal: 3 },
-});a
+});
