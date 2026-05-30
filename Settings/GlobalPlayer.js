@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
-import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; 
+// 🚨 expo-audio পুরোপুরি বাদ দিয়ে TrackPlayer যুক্ত করা হলো 🚨
+import TrackPlayer, { Capability, State, Event } from 'react-native-track-player'; 
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -10,7 +11,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as WebBrowser from 'expo-web-browser'; 
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
-LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video']);
+LogBox.ignoreLogs(['Video component', 'expo-video', 'react-native-track-player']);
 
 const windowDim = Dimensions.get('window');
 const PORTRAIT_WIDTH = Math.min(windowDim.width, windowDim.height);
@@ -22,7 +23,7 @@ const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
-// 🚨 [FIX] Getter-Only এরর সমাধানের জন্য সেফটি ফাংশন তৈরি করা হলো 🚨
+// 🚨 Video-র Getter-Only এরর সমাধানের জন্য সেফটি ফাংশন 🚨
 const safeSeek = (p, targetSec) => {
     if (!p) return;
     try {
@@ -41,14 +42,6 @@ const safeSetRate = (p, rate) => {
     } catch (e) {}
 };
 
-const safeSetVolume = (p, vol) => {
-    if (!p) return;
-    try {
-        if (typeof p.setVolume === 'function') p.setVolume(vol);
-        else p.volume = vol;
-    } catch(e) {}
-};
-
 const safeSetMuted = (p, isMuted) => {
     if (!p) return;
     try {
@@ -60,7 +53,6 @@ const safeSetMuted = (p, isMuted) => {
 export default function GlobalPlayer() {
   const navigation = useNavigation();
   const videoViewRef = useRef(null); 
-  const syncAudioRef = useRef(null); 
   
   const currentVideoIdRef = useRef(null);
   const fetchIdRef = useRef(0);
@@ -107,33 +99,36 @@ export default function GlobalPlayer() {
   const isSyncingRef = useRef(false);
   const pendingSeekRef = useRef(null); 
 
+  // 🚨 TrackPlayer Setup (নোটিফিকেশন বার কনফিগারেশন) 🚨
   useEffect(() => {
-    const setupAudio = async () => {
+    const setupPlayer = async () => {
       try {
-        await setAudioModeAsync({
-          staysActiveInBackground: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
+        await TrackPlayer.setupPlayer();
+        await TrackPlayer.updateOptions({
+          capabilities: [
+            Capability.Play,
+            Capability.Pause,
+            Capability.SeekTo,
+          ],
+          compactCapabilities: [Capability.Play, Capability.Pause],
+          notificationCapabilities: [Capability.Play, Capability.Pause],
+          stopWithApp: true,
         });
-      } catch (e) { console.log("Audio Setup Error:", e); }
+      } catch (e) { console.log("TrackPlayer setup error:", e); }
     };
-    setupAudio();
+    setupPlayer();
   }, []);
 
-  const safeReleaseAudio = () => {
-      if (syncAudioRef.current) {
-          try { syncAudioRef.current.release(); } catch(e) {}
-          syncAudioRef.current = null;
-      }
+  const safeReleaseAudio = async () => {
+      try { await TrackPlayer.reset(); } catch(e) {}
   };
 
   const player = useVideoPlayer(videoSource, (p) => {
     if (!videoSource) return; 
     try { p.loop = false; } catch(e) {}
-    safeSetRate(p, currentSpeed); // 🚨 Getter এরর সলভড
+    safeSetRate(p, currentSpeed); 
     if (streamModeRef.current === 'separate') {
-        safeSetMuted(p, true); // 🚨 Getter এরর সলভড
+        safeSetMuted(p, true); 
     }
   });
 
@@ -143,14 +138,25 @@ export default function GlobalPlayer() {
     controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
   };
 
+  // নোটিফিকেশন প্লে/পজ এর সাথে ভিডিও সিঙ্ক করার জন্য ইভেন্ট লিসেনার
+  useEffect(() => {
+    const playSub = TrackPlayer.addEventListener(Event.RemotePlay, () => {
+        TrackPlayer.play();
+        if (!isAudioModeRef.current && player) player.play();
+    });
+    const pauseSub = TrackPlayer.addEventListener(Event.RemotePause, () => {
+        TrackPlayer.pause();
+        if (!isAudioModeRef.current && player) player.pause();
+    });
+    return () => { playSub.remove(); pauseSub.remove(); };
+  }, [player]);
+
   useEffect(() => {
     const appStateSub = AppState.addEventListener('change', async (nextAppState) => {
         if (nextAppState.match(/inactive|background/)) {
             if (!isAudioModeRef.current) {
                 if (player && player.playing) player.pause();
-                if (syncAudioRef.current && syncAudioRef.current.playing) {
-                    syncAudioRef.current.pause();
-                }
+                await TrackPlayer.pause();
             }
         }
     });
@@ -234,11 +240,11 @@ export default function GlobalPlayer() {
       setCurrentTime(newTime); 
       try {
           if (isAudioModeRef.current) {
-              safeSeek(syncAudioRef.current, newTime); // 🚨 Getter এরর সলভড
+              await TrackPlayer.seekTo(newTime); 
           } else {
-              safeSeek(player, newTime); // 🚨 Getter এরর সলভড
-              if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-                  safeSeek(syncAudioRef.current, newTime); 
+              safeSeek(player, newTime); 
+              if (streamModeRef.current === 'separate') {
+                  await TrackPlayer.seekTo(newTime); 
               }
           }
       } catch (error) { console.log("Seek Error: ", error); }
@@ -273,7 +279,7 @@ export default function GlobalPlayer() {
       baseScaleRef.current = 1;
       triggerControls();
 
-      safeReleaseAudio();
+      await safeReleaseAudio();
 
       const targetQuality = global.appSettings?.normalVideo || '720p';
       fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
@@ -289,8 +295,11 @@ export default function GlobalPlayer() {
           setVideoSource(null); 
           setIsPlayingUI(true); 
 
-          if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-              if (!syncAudioRef.current.playing) syncAudioRef.current.play();
+          if (streamModeRef.current === 'separate') {
+              const state = await TrackPlayer.getPlaybackState();
+              if (state.state !== State.Playing && state !== State.Playing) {
+                  await TrackPlayer.play();
+              }
           } else {
               let audioUrlToPlay = cachedAudioUrlRef.current;
               if (!audioUrlToPlay) {
@@ -304,23 +313,30 @@ export default function GlobalPlayer() {
                   } catch (e) {}
               }
               if (audioUrlToPlay) {
-                  safeReleaseAudio();
-                  syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
-                  pendingSeekRef.current = resumeTimeRef.current; 
-                  safeSetRate(syncAudioRef.current, currentSpeed); // 🚨 Getter এরর সলভড
-                  syncAudioRef.current.play();
+                  await safeReleaseAudio();
+                  // 🚨 নোটিফিকেশনে গান, ছবি এবং চ্যানেলের নাম দেখানোর কমান্ড 🚨
+                  await TrackPlayer.add({
+                      id: currentVideoIdRef.current,
+                      url: audioUrlToPlay,
+                      title: videoData?.title || 'Unknown Video',
+                      artist: videoData?.channel || 'Unknown Channel',
+                      artwork: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg`,
+                  });
+                  await TrackPlayer.seekTo(resumeTimeRef.current); 
+                  await TrackPlayer.setRate(currentSpeed); 
+                  await TrackPlayer.play();
               }
           }
       } else {
           let resumeVideoTime = resumeTimeRef.current;
 
-          if (syncAudioRef.current) {
-              resumeVideoTime = syncAudioRef.current.currentTime;
-              if (streamModeRef.current !== 'separate') {
-                  safeReleaseAudio();
-              } else {
-                  syncAudioRef.current.pause();
-              }
+          const progress = await TrackPlayer.getProgress();
+          resumeVideoTime = progress.position;
+          
+          if (streamModeRef.current !== 'separate') {
+              await safeReleaseAudio();
+          } else {
+              await TrackPlayer.pause();
           }
 
           resumeTimeRef.current = resumeVideoTime;
@@ -332,7 +348,7 @@ export default function GlobalPlayer() {
         playSub.remove();
         audioModeSub.remove();
     };
-  }, [isFullscreen, streamUrl]);
+  }, [isFullscreen, streamUrl, videoData]);
 
   useEffect(() => {
       let timeoutId;
@@ -340,13 +356,13 @@ export default function GlobalPlayer() {
           timeoutId = setTimeout(async () => {
               try {
                   if (resumeTimeRef.current > 0) {
-                      safeSeek(player, resumeTimeRef.current); // 🚨 Getter এরর সলভড
+                      safeSeek(player, resumeTimeRef.current); 
                   }
                   player.play();
 
-                  if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-                      safeSeek(syncAudioRef.current, resumeTimeRef.current); // 🚨 Getter এরর সলভড
-                      syncAudioRef.current.play();
+                  if (streamModeRef.current === 'separate') {
+                      await TrackPlayer.seekTo(resumeTimeRef.current); 
+                      await TrackPlayer.play();
                   }
               } catch (e) {}
           }, 800); 
@@ -388,11 +404,17 @@ export default function GlobalPlayer() {
     setVideoSource(json.url); 
     
     if (json.audioUrl && streamModeRef.current === 'separate') {
-        safeReleaseAudio();
-        syncAudioRef.current = createAudioPlayer(json.audioUrl);
-        safeSetVolume(syncAudioRef.current, 1.0); // 🚨 Getter এরর সলভড
-        safeSetRate(syncAudioRef.current, currentSpeed); // 🚨 Getter এরর সলভড
-        syncAudioRef.current.play();
+        await safeReleaseAudio();
+        await TrackPlayer.add({
+            id: currentVideoIdRef.current,
+            url: json.audioUrl,
+            title: videoData?.title || 'Unknown Video',
+            artist: videoData?.channel || 'Unknown Channel',
+            artwork: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg`,
+        });
+        await TrackPlayer.setVolume(1.0);
+        await TrackPlayer.setRate(currentSpeed); 
+        await TrackPlayer.play();
     }
   };
 
@@ -430,12 +452,13 @@ export default function GlobalPlayer() {
 
   const changeSpeed = async (speed) => {
       setCurrentSpeed(speed);
-      safeSetRate(player, speed); // 🚨 Getter এরর সলভড
-      safeSetRate(syncAudioRef.current, speed); // 🚨 Getter এরর সলভড
+      safeSetRate(player, speed); 
+      await TrackPlayer.setRate(speed); 
       setShowSpeedMenu(false);
       setShowSettingsMenu(false);
   };
 
+  // 🚨 TrackPlayer এর State Sync Loop 🚨
   useEffect(() => {
     const interval = setInterval(async () => {
         if (isSyncingRef.current) return; 
@@ -443,18 +466,20 @@ export default function GlobalPlayer() {
         if (isAudioMode) {
             isSyncingRef.current = true;
             try {
-                const isAudioReady = syncAudioRef.current && (syncAudioRef.current.duration > 0 || syncAudioRef.current.playing);
-                if (isAudioReady) {
-                    setIsPlayingUI(syncAudioRef.current.playing);
+                const { position, duration, buffered } = await TrackPlayer.getProgress();
+                const stateObj = await TrackPlayer.getPlaybackState();
+                const isAudioPlaying = (stateObj.state === State.Playing || stateObj === State.Playing || stateObj === 'playing');
 
-                    if (pendingSeekRef.current !== null) {
-                        safeSeek(syncAudioRef.current, pendingSeekRef.current); // 🚨 Getter এরর সলভড
-                        setCurrentTime(pendingSeekRef.current);
-                        pendingSeekRef.current = null;
-                    } else if (!isSlidingRef.current) {
-                        setCurrentTime(syncAudioRef.current.currentTime);
-                        if (syncAudioRef.current.duration > 0) setDuration(syncAudioRef.current.duration);
-                    }
+                setIsPlayingUI(isAudioPlaying);
+                setBuffered(buffered);
+
+                if (pendingSeekRef.current !== null) {
+                    await TrackPlayer.seekTo(pendingSeekRef.current); 
+                    setCurrentTime(pendingSeekRef.current);
+                    pendingSeekRef.current = null;
+                } else if (!isSlidingRef.current) {
+                    setCurrentTime(position);
+                    if (duration > 0) setDuration(duration);
                 }
             } catch(e) {}
             isSyncingRef.current = false;
@@ -471,17 +496,18 @@ export default function GlobalPlayer() {
             if (streamMode === 'separate' && videoSource) {
                 isSyncingRef.current = true;
                 try {
-                    const isAudioReady = syncAudioRef.current && (syncAudioRef.current.duration > 0 || syncAudioRef.current.playing);
-                    if (isAudioReady) {
-                        if (player && player.playing) {
-                            const diff = Math.abs(player.currentTime - syncAudioRef.current.currentTime);
-                            if (diff > 1.5) { 
-                                safeSeek(syncAudioRef.current, player.currentTime); // 🚨 Getter এরর সলভড
-                            }
-                            if (!syncAudioRef.current.playing) syncAudioRef.current.play();
-                        } else {
-                            if (syncAudioRef.current.playing) syncAudioRef.current.pause();
+                    const { position } = await TrackPlayer.getProgress();
+                    const stateObj = await TrackPlayer.getPlaybackState();
+                    const isAudioPlaying = (stateObj.state === State.Playing || stateObj === State.Playing || stateObj === 'playing');
+
+                    if (player && player.playing) {
+                        const diff = Math.abs(player.currentTime - position);
+                        if (diff > 1.5) { 
+                            await TrackPlayer.seekTo(player.currentTime); 
                         }
+                        if (!isAudioPlaying) await TrackPlayer.play();
+                    } else {
+                        if (isAudioPlaying) await TrackPlayer.pause();
                     }
                 } catch(e) {}
                 isSyncingRef.current = false;
@@ -576,7 +602,7 @@ export default function GlobalPlayer() {
       setStreamUrl(null);
       setVideoSource(null); 
       if (player) player.pause();
-      safeReleaseAudio();
+      await safeReleaseAudio();
   };
 
   const formatTime = (timeInSeconds) => {
@@ -653,17 +679,19 @@ export default function GlobalPlayer() {
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={async () => {
                     if (isAudioMode) {
-                        if (syncAudioRef.current) {
-                            if (syncAudioRef.current.playing) syncAudioRef.current.pause();
-                            else syncAudioRef.current.play();
+                        const stateObj = await TrackPlayer.getPlaybackState();
+                        if (stateObj.state === State.Playing || stateObj === State.Playing || stateObj === 'playing') {
+                            await TrackPlayer.pause();
+                        } else {
+                            await TrackPlayer.play();
                         }
                     } else if (player) {
                         if (player.playing) {
                             player.pause();
-                            if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
+                            if (streamMode === 'separate') await TrackPlayer.pause();
                         } else {
                             player.play();
-                            if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
+                            if (streamMode === 'separate') await TrackPlayer.play();
                         }
                     }
                     triggerControls();
@@ -808,17 +836,19 @@ export default function GlobalPlayer() {
                 <View style={styles.miniControlsRow}>
                     <TouchableOpacity style={styles.miniCtrlBtn} onPress={async () => {
                         if (isAudioMode) {
-                            if (syncAudioRef.current) {
-                                if (syncAudioRef.current.playing) syncAudioRef.current.pause();
-                                else syncAudioRef.current.play();
+                            const stateObj = await TrackPlayer.getPlaybackState();
+                            if (stateObj.state === State.Playing || stateObj === State.Playing || stateObj === 'playing') {
+                                await TrackPlayer.pause();
+                            } else {
+                                await TrackPlayer.play();
                             }
                         } else if (player) {
                             if (player.playing) {
                                 player.pause();
-                                if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
+                                if (streamMode === 'separate') await TrackPlayer.pause();
                             } else {
                                 player.play();
-                                if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
+                                if (streamMode === 'separate') await TrackPlayer.play();
                             }
                         }
                     }}>
