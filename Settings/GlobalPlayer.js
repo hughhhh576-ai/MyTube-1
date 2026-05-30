@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
-import { createAudioPlayer } from 'expo-audio'; // 🚨 expo-av এর বদলে expo-audio যুক্ত করা হয়েছে 🚨
+import { createAudioPlayer } from 'expo-audio'; 
+import { Audio } from 'expo-av'; // 🚨 Audio Focus ফিক্স করার জন্য এটি আবার আনা হয়েছে
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -24,8 +25,6 @@ const MY_API_SERVER = "http://127.0.0.1:10000";
 export default function GlobalPlayer() {
   const navigation = useNavigation();
   const videoViewRef = useRef(null); 
-  
-  // 🚨 expo-audio প্লেয়ারের রেফারেন্স 🚨
   const syncAudioRef = useRef(null); 
   
   const currentVideoIdRef = useRef(null);
@@ -72,10 +71,30 @@ export default function GlobalPlayer() {
   
   const isSyncingRef = useRef(false);
 
+  // 🚨 ফিক্স ১: Audio Session Mixing অ্যালাউ করা হলো যেন ভিডিও পজ না হয়
+  useEffect(() => {
+    const setupAudio = async () => {
+      try {
+        await Audio.setAudioModeAsync({
+          staysActiveInBackground: true,
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+      } catch (e) { console.log("Audio Setup Error:", e); }
+    };
+    setupAudio();
+  }, []);
+
+  // 🚨 ফিক্স ২: সেপারেট অডিও থাকলে ভিডিওর ডিফল্ট অডিও মিউট করা হলো
   const player = useVideoPlayer(videoSource, (p) => {
     if (!videoSource) return; 
     p.loop = false;
-    p.playbackRate = currentSpeed; 
+    p.playbackRate = currentSpeed;
+    if (streamModeRef.current === 'separate') {
+        p.muted = true; 
+    }
+    p.play(); 
   });
 
   const triggerControls = () => {
@@ -89,7 +108,6 @@ export default function GlobalPlayer() {
         if (nextAppState.match(/inactive|background/)) {
             if (!isAudioModeRef.current) {
                 if (player && player.playing) player.pause();
-                // 🚨 expo-audio ব্যাকগ্রাউন্ড পজ 🚨
                 if (syncAudioRef.current && syncAudioRef.current.playing) {
                     syncAudioRef.current.pause();
                 }
@@ -172,15 +190,6 @@ export default function GlobalPlayer() {
     } catch (error) { console.log(error); }
   };
 
-  const syncAudioWithVideo = async (targetPositionSeconds) => {
-      try {
-          if (syncAudioRef.current) {
-              syncAudioRef.current.currentTime = targetPositionSeconds;
-              if (player && player.playing) syncAudioRef.current.play();
-          }
-      } catch (e) {}
-  };
-
   useEffect(() => {
     const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
       if (currentVideoIdRef.current === data.videoId) {
@@ -209,7 +218,6 @@ export default function GlobalPlayer() {
       baseScaleRef.current = 1;
       triggerControls();
 
-      // 🚨 পুরনো অডিও প্লেয়ার ক্লিয়ার 🚨
       if (syncAudioRef.current) {
           syncAudioRef.current.release();
           syncAudioRef.current = null;
@@ -243,8 +251,6 @@ export default function GlobalPlayer() {
 
           if (audioUrlToPlay) {
               if (syncAudioRef.current) syncAudioRef.current.release();
-              
-              // 🚨 expo-audio দিয়ে অডিও প্লে শুরু 🚨
               syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
               syncAudioRef.current.currentTime = resumeTimeRef.current;
               syncAudioRef.current.playbackRate = currentSpeed;
@@ -283,8 +289,6 @@ export default function GlobalPlayer() {
                   if (resumeTimeRef.current > 0) {
                       player.currentTime = resumeTimeRef.current;
                   }
-                  player.play();
-
                   if (streamModeRef.current === 'separate' && syncAudioRef.current) {
                       syncAudioRef.current.currentTime = resumeTimeRef.current;
                       syncAudioRef.current.play();
@@ -321,17 +325,17 @@ export default function GlobalPlayer() {
   };
 
   const startPlayback = async (json) => {
-    setStreamMode(json.streamType || 'combined');
-    streamModeRef.current = json.streamType || 'combined';
+    const currentMode = json.streamType || 'combined';
+    setStreamMode(currentMode);
+    streamModeRef.current = currentMode;
     cachedAudioUrlRef.current = json.audioUrl || null; 
     
     setStreamUrl(json.url);
     setVideoSource(json.url); 
     
-    if (json.audioUrl) {
+    // 🚨 ফিক্স ৩: শুধুমাত্র Separate মোড হলেই অডিও প্লে হবে, নতুবা ডাবল অডিও হয়ে যাবে
+    if (json.audioUrl && currentMode === 'separate') {
         if (syncAudioRef.current) syncAudioRef.current.release();
-        
-        // 🚨 সেপারেট অডিও লোডিং (expo-audio) 🚨
         syncAudioRef.current = createAudioPlayer(json.audioUrl);
         syncAudioRef.current.volume = 1.0;
         syncAudioRef.current.playbackRate = currentSpeed;
@@ -350,7 +354,7 @@ export default function GlobalPlayer() {
           if (syncAudioRef.current) syncAudioRef.current.currentTime = newTime;
       } else if (player) {
           player.currentTime = newTime; 
-          if (streamMode === 'separate') await syncAudioWithVideo(newTime); 
+          if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.currentTime = newTime; 
       }
       
       setCurrentTime(newTime);
@@ -423,7 +427,7 @@ export default function GlobalPlayer() {
                     if (syncAudioRef.current) {
                         if (player && player.playing) {
                             const diff = Math.abs(player.currentTime - syncAudioRef.current.currentTime);
-                            if (diff > 0.8) { // 800ms এর বেশি পার্থক্য হলে সিঙ্ক করবে
+                            if (diff > 0.8) { 
                                 syncAudioRef.current.currentTime = player.currentTime;
                             }
                             if (!syncAudioRef.current.playing) syncAudioRef.current.play();
@@ -525,7 +529,6 @@ export default function GlobalPlayer() {
       setVideoSource(null); 
       if (player) player.pause();
       
-      // 🚨 প্লেয়ার বন্ধ করার সময় অডিও ক্লিয়ার 🚨
       if (syncAudioRef.current) {
           syncAudioRef.current.release();
           syncAudioRef.current = null;
@@ -654,7 +657,7 @@ export default function GlobalPlayer() {
                               if (syncAudioRef.current) syncAudioRef.current.currentTime = v;
                           } else if (player) {
                               player.currentTime = v; 
-                              if (streamMode === 'separate') await syncAudioWithVideo(v);
+                              if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.currentTime = v;
                           }
                           isSlidingRef.current = false; 
                           triggerControls();
