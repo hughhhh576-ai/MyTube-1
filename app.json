@@ -95,8 +95,6 @@
         }
       ],
       "expo-web-browser",
-      "expo-audio",
-      "expo-video",
       "expo-background-fetch",
       "expo-secure-store"
     ]
