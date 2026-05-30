@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
-import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; // 🚨 expo-av সম্পূর্ণ বাদ দিয়ে expo-audio এর API আনা হয়েছে
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; // 🚨 expo-av সম্পূর্ণ বাদ দিয়ে expo-audio
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -24,7 +24,7 @@ const MY_API_SERVER = "http://127.0.0.1:10000";
 export default function GlobalPlayer() {
   const navigation = useNavigation();
   const videoViewRef = useRef(null); 
-  const syncAudioRef = useRef(null); 
+  const syncAudioRef = useRef(null); // 🚨 expo-audio প্লেয়ার রেফারেন্স
   
   const currentVideoIdRef = useRef(null);
   const fetchIdRef = useRef(0);
@@ -85,12 +85,10 @@ export default function GlobalPlayer() {
     setupAudio();
   }, []);
 
-  // 🚨 সেফ রিলিজ ফাংশন: মেমোরি লিক বা already released এরর বন্ধ করতে
+  // 🚨 সেফ রিলিজ ফাংশন
   const safeReleaseAudio = () => {
       if (syncAudioRef.current) {
-          try {
-              syncAudioRef.current.release();
-          } catch(e) {}
+          try { syncAudioRef.current.release(); } catch(e) {}
           syncAudioRef.current = null;
       }
   };
@@ -99,10 +97,7 @@ export default function GlobalPlayer() {
     if (!videoSource) return; 
     p.loop = false;
     p.playbackRate = currentSpeed;
-    if (streamModeRef.current === 'separate') {
-        p.muted = true; 
-    }
-    p.play(); 
+    if (streamModeRef.current === 'separate') p.muted = true; 
   });
 
   const triggerControls = () => {
@@ -198,6 +193,21 @@ export default function GlobalPlayer() {
     } catch (error) { console.log(error); }
   };
 
+  // 🚨 [FIX 1] ভিডিও টেনে দেওয়ার সময় সিঙ্ক করার ইউনিভার্সাল ফাংশন (expo-audio) 🚨
+  const seekTo = async (newTime) => {
+      setCurrentTime(newTime); 
+      try {
+          if (isAudioModeRef.current) {
+              if (syncAudioRef.current) syncAudioRef.current.currentTime = newTime;
+          } else {
+              if (player) player.currentTime = newTime; 
+              if (streamModeRef.current === 'separate' && syncAudioRef.current) {
+                  syncAudioRef.current.currentTime = newTime;
+              }
+          }
+      } catch (error) { console.log("Seek Error: ", error); }
+  };
+
   useEffect(() => {
     const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
       if (currentVideoIdRef.current === data.videoId) {
@@ -226,7 +236,7 @@ export default function GlobalPlayer() {
       baseScaleRef.current = 1;
       triggerControls();
 
-      safeReleaseAudio(); // 🚨 সেফ রিলিজ ব্যবহার করা হলো
+      safeReleaseAudio();
 
       const targetQuality = global.appSettings?.normalVideo || '720p';
       fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
@@ -237,38 +247,41 @@ export default function GlobalPlayer() {
       isAudioModeRef.current = mode;
 
       if (mode) {
-          resumeTimeRef.current = player ? player.currentTime : 0;
-          setVideoSource(null); 
-          setIsPlayingUI(false); 
-          
-          let audioUrlToPlay = cachedAudioUrlRef.current;
+          // 🚨 [FIX 2] ভিডিও বন্ধ করে অডিও রেডি করার কাজ 🚨
+          resumeTimeRef.current = player ? player.currentTime : currentTime;
+          if (player) player.pause();
+          setVideoSource(null); // ভিডিও কেটে গেল
+          setIsPlayingUI(true); 
 
-          if (!audioUrlToPlay) {
-              try {
-                  const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&action=play&type=audio`);
-                  const json = await res.json();
-                  if (json.success && (json.audioUrl || json.url)) {
-                      audioUrlToPlay = json.audioUrl || json.url;
-                      cachedAudioUrlRef.current = audioUrlToPlay; 
-                  }
-              } catch (e) { console.log(e); }
+          if (streamModeRef.current === 'separate' && syncAudioRef.current) {
+              if (!syncAudioRef.current.playing) syncAudioRef.current.play();
+          } else {
+              let audioUrlToPlay = cachedAudioUrlRef.current;
+              if (!audioUrlToPlay) {
+                  try {
+                      const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&action=play&type=audio`);
+                      const json = await res.json();
+                      if (json.success && (json.audioUrl || json.url)) {
+                          audioUrlToPlay = json.audioUrl || json.url;
+                          cachedAudioUrlRef.current = audioUrlToPlay; 
+                      }
+                  } catch (e) { console.log(e); }
+              }
+              if (audioUrlToPlay) {
+                  safeReleaseAudio();
+                  syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
+                  syncAudioRef.current.currentTime = resumeTimeRef.current;
+                  syncAudioRef.current.playbackRate = currentSpeed;
+                  syncAudioRef.current.play();
+              }
           }
-
-          if (audioUrlToPlay) {
-              safeReleaseAudio(); // 🚨 সেফ রিলিজ
-              syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
-              syncAudioRef.current.currentTime = resumeTimeRef.current;
-              syncAudioRef.current.playbackRate = currentSpeed;
-              syncAudioRef.current.play();
-          }
-
       } else {
           let resumeVideoTime = resumeTimeRef.current;
 
           if (syncAudioRef.current) {
               resumeVideoTime = syncAudioRef.current.currentTime;
               if (streamModeRef.current !== 'separate') {
-                  safeReleaseAudio(); // 🚨 সেফ রিলিজ
+                  safeReleaseAudio();
               } else {
                   syncAudioRef.current.pause();
               }
@@ -293,6 +306,8 @@ export default function GlobalPlayer() {
                   if (resumeTimeRef.current > 0) {
                       player.currentTime = resumeTimeRef.current;
                   }
+                  player.play();
+
                   if (streamModeRef.current === 'separate' && syncAudioRef.current) {
                       syncAudioRef.current.currentTime = resumeTimeRef.current;
                       syncAudioRef.current.play();
@@ -329,16 +344,15 @@ export default function GlobalPlayer() {
   };
 
   const startPlayback = async (json) => {
-    const currentMode = json.streamType || 'combined';
-    setStreamMode(currentMode);
-    streamModeRef.current = currentMode;
+    setStreamMode(json.streamType || 'combined');
+    streamModeRef.current = json.streamType || 'combined';
     cachedAudioUrlRef.current = json.audioUrl || null; 
     
     setStreamUrl(json.url);
     setVideoSource(json.url); 
     
-    if (json.audioUrl && currentMode === 'separate') {
-        safeReleaseAudio(); // 🚨 সেফ রিলিজ
+    if (json.audioUrl && streamModeRef.current === 'separate') {
+        safeReleaseAudio();
         syncAudioRef.current = createAudioPlayer(json.audioUrl);
         syncAudioRef.current.volume = 1.0;
         syncAudioRef.current.playbackRate = currentSpeed;
@@ -353,14 +367,7 @@ export default function GlobalPlayer() {
       if (newTime < 0) newTime = 0;
       if (newTime > duration) newTime = duration;
       
-      if (isAudioMode) {
-          if (syncAudioRef.current) syncAudioRef.current.currentTime = newTime;
-      } else if (player) {
-          player.currentTime = newTime; 
-          if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.currentTime = newTime; 
-      }
-      
-      setCurrentTime(newTime);
+      await seekTo(newTime);
       if (!isSilent) triggerControls(); 
   };
 
@@ -388,9 +395,7 @@ export default function GlobalPlayer() {
   const changeSpeed = async (speed) => {
       setCurrentSpeed(speed);
       if (player) player.playbackRate = speed;
-      if (syncAudioRef.current) {
-          syncAudioRef.current.playbackRate = speed;
-      }
+      if (syncAudioRef.current) syncAudioRef.current.playbackRate = speed;
       setShowSpeedMenu(false);
       setShowSettingsMenu(false);
   };
@@ -405,10 +410,9 @@ export default function GlobalPlayer() {
                 if (syncAudioRef.current) {
                     setIsPlayingUI(syncAudioRef.current.playing);
                     setBuffered(syncAudioRef.current.bufferedPosition || 0);
-                    
                     if (!isSlidingRef.current) {
                         setCurrentTime(syncAudioRef.current.currentTime);
-                        setDuration(syncAudioRef.current.duration > 0 ? syncAudioRef.current.duration : 1);
+                        if (syncAudioRef.current.duration > 0) setDuration(syncAudioRef.current.duration);
                     }
                 }
             } catch(e) {}
@@ -430,7 +434,7 @@ export default function GlobalPlayer() {
                     if (syncAudioRef.current) {
                         if (player && player.playing) {
                             const diff = Math.abs(player.currentTime - syncAudioRef.current.currentTime);
-                            if (diff > 0.8) { 
+                            if (diff > 1.0) { 
                                 syncAudioRef.current.currentTime = player.currentTime;
                             }
                             if (!syncAudioRef.current.playing) syncAudioRef.current.play();
@@ -531,8 +535,7 @@ export default function GlobalPlayer() {
       setStreamUrl(null);
       setVideoSource(null); 
       if (player) player.pause();
-      
-      safeReleaseAudio(); // 🚨 সেফ রিলিজ
+      safeReleaseAudio();
   };
 
   const formatTime = (timeInSeconds) => {
@@ -606,12 +609,7 @@ export default function GlobalPlayer() {
         {isInteractiveFull && showControls && !fallbackData && (
           <View style={styles.controls} pointerEvents="box-none">
              
-             <View style={styles.topBar}>
-                 <View style={{flex: 1}} />
-                 <TouchableOpacity style={styles.iconBtn} onPress={() => setShowSettingsMenu(true)}>
-                     <Ionicons name="settings-outline" size={28} color="#FFF" />
-                 </TouchableOpacity>
-             </View>
+             {/* ওপর থেকে Settings Button রিমুভ করা হয়েছে */}
              
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={async () => {
@@ -653,12 +651,7 @@ export default function GlobalPlayer() {
                       }}
                       onValueChange={(v) => setCurrentTime(v)} 
                       onSlidingComplete={async (v) => {
-                          if (isAudioMode) {
-                              if (syncAudioRef.current) syncAudioRef.current.currentTime = v;
-                          } else if (player) {
-                              player.currentTime = v; 
-                              if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.currentTime = v;
-                          }
+                          await seekTo(v);
                           isSlidingRef.current = false; 
                           triggerControls();
                       }}
@@ -670,8 +663,13 @@ export default function GlobalPlayer() {
 
                 <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
                 
-                <TouchableOpacity style={{marginLeft: 10}} onPress={toggleFullscreen}>
-                    <Ionicons name={isFullscreen ? "contract" : "expand"} size={24} color="#FFF" />
+                {/* 🚨 [FIX 3] Settings বাটনটি এখন নিচে চলে এসেছে 🚨 */}
+                <TouchableOpacity style={{marginLeft: 12}} onPress={() => setShowSettingsMenu(true)}>
+                    <Ionicons name="settings-outline" size={22} color="#FFF" />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={{marginLeft: 12}} onPress={toggleFullscreen}>
+                    <Ionicons name={isFullscreen ? "contract" : "expand"} size={22} color="#FFF" />
                 </TouchableOpacity>
              </View>
           </View>
@@ -793,9 +791,6 @@ const styles = StyleSheet.create({
   tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 5 }, 
   tapHalf: { flex: 1 },
   controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
-  
-  topBar: { position: 'absolute', top: 10, left: 10, right: 15, flexDirection: 'row', justifyContent: 'space-between', zIndex: 20 },
-  iconBtn: { padding: 5 },
   
   centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 },
   bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 20 },
