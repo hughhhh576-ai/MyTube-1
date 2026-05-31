@@ -10,12 +10,14 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as WebBrowser from 'expo-web-browser'; 
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
+// 🚨 [FIXED]: নতুন টাচ এররটি ইগনোর লিস্টে যুক্ত করা হলো
 LogBox.ignoreLogs([
   'Video component', 
   'expo-audio', 
   'expo-video',
   'SafeAreaView has been deprecated',
-  'InteractionManager has been deprecated'
+  'InteractionManager has been deprecated',
+  'Ended a touch event which was not counted in'
 ]);
 
 const windowDim = Dimensions.get('window');
@@ -28,7 +30,6 @@ const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
-// 🚨 [SDK 56 FIX]: Getter-Only এরর যেন না হয় তার জন্য প্রোটেক্টেড ফাংশন 🚨
 const safeSeek = (p, targetSec) => {
     if (!p) return;
     try {
@@ -517,8 +518,9 @@ export default function GlobalPlayer() {
       triggerControls();
   };
 
+  // 🚨 [FIXED]: Touch Conflict ঠিক করা হয়েছে 🚨
   const videoPanResponder = useRef(PanResponder.create({
-      onStartShouldSetPanResponder: () => false, 
+      onStartShouldSetPanResponder: () => true, // 🚨 এখন PanResponder নিজেই ট্যাপ রিসিভ করবে
       onMoveShouldSetPanResponder: (evt, gestureState) => {
           const touches = evt.nativeEvent.touches;
           if (touches && touches.length >= 2) return true; 
@@ -568,8 +570,10 @@ export default function GlobalPlayer() {
                   return prev;
               });
           } 
+          // 🚨 [FIXED]: ট্যাপ হ্যান্ডলিং এখন সরাসরি এখান থেকে হবে
           else if (Math.abs(gestureState.dx) < 15 && Math.abs(gestureState.dy) < 15) {
-              const side = gestureState.x0 < (PORTRAIT_WIDTH / 2) ? 'left' : 'right';
+              const currentWidth = Dimensions.get('window').width;
+              const side = gestureState.x0 < (currentWidth / 2) ? 'left' : 'right';
               handleTap(side);
           }
       },
@@ -629,44 +633,37 @@ export default function GlobalPlayer() {
       <View style={styles.videoWrapper}>
         
         {streamUrl && !fallbackData && (
-          <View style={{ flex: 1, width: '100%', height: '100%' }}>
-            
-            <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
-                {videoSource ? (
-                    <VideoView 
-                        ref={videoViewRef} 
-                        player={player} 
-                        style={styles.video} 
-                        contentFit="contain"
-                        nativeControls={false} 
-                        surfaceType="textureView" // 🚨 [SDK 56 FIX]: Android-এ UI Overlap সমস্যা সমাধান
-                    />
-                ) : null}
-            </Animated.View>
+          <Animated.View style={[StyleSheet.absoluteFillObject, { transform: [{ scale: scale }] }]}>
+              {videoSource ? (
+                  <VideoView 
+                      ref={videoViewRef} 
+                      player={player} 
+                      style={styles.video} 
+                      contentFit="contain"
+                      nativeControls={false} 
+                      surfaceType="textureView" 
+                  />
+              ) : null}
 
-            {isAudioMode && (
-                <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
-                    <Image 
-                        source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
-                        style={[StyleSheet.absoluteFillObject, { opacity: 0.2 }]}
-                        resizeMode="cover"
-                    />
-                    <Ionicons name="headset" size={70} color="#00BFA5" />
-                    <Text style={{ color: '#00BFA5', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>ব্যাকগ্রাউন্ড অডিও মোড চলছে</Text>
-                </View>
-            )}
-          </View>
+              {isAudioMode && (
+                  <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
+                      <Image 
+                          source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
+                          style={[StyleSheet.absoluteFillObject, { opacity: 0.2 }]}
+                          resizeMode="cover"
+                      />
+                      <Ionicons name="headset" size={70} color="#00BFA5" />
+                      <Text style={{ color: '#00BFA5', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>ব্যাকগ্রাউন্ড অডিও মোড চলছে</Text>
+                  </View>
+              )}
+          </Animated.View>
         )}
 
-        {/* 🚨 ডাবল ট্যাপ স্কিপ 🚨 */}
+        {/* 🚨 [FIXED]: ভেতরের TouchableOpacity ডিলিট করে দেওয়া হয়েছে 🚨 */}
         {isInteractiveFull && !fallbackData && (
-            <View style={styles.tapOverlay} {...videoPanResponder.panHandlers}>
-                <TouchableOpacity activeOpacity={1} style={styles.tapHalf} onPress={() => handleTap('left')} />
-                <TouchableOpacity activeOpacity={1} style={styles.tapHalf} onPress={() => handleTap('right')} />
-            </View>
+            <View style={styles.tapOverlay} {...videoPanResponder.panHandlers} />
         )}
 
-        {/* 🚨 ভিডিওর ওপরের কন্ট্রোল, বাটন এবং সেটিং 🚨 */}
         {isInteractiveFull && showControls && !fallbackData && (
           <View style={styles.controls} pointerEvents="box-none">
              
@@ -834,13 +831,12 @@ const styles = StyleSheet.create({
   centerContainer: { position: 'absolute', top: 0, left: 0, width: PORTRAIT_WIDTH, height: PORTRAIT_HEIGHT, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
   
-  // 🚨 একদম আগের সিম্পল স্টাইল, কোনো জটিলতা ছাড়াই 🚨
   videoWrapper: { flex: 1, backgroundColor: '#000', overflow: 'hidden' },
   animatedVideoWrapper: { flex: 1, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }, 
   video: { flex: 1, width: '100%', height: '100%' },
   
-  tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 50 }, 
-  tapHalf: { flex: 1, height: '100%' },
+  // 🚨 [FIXED]: tapOverlay এখন সম্পূর্ণ ক্লিন 🚨
+  tapOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 50 }, 
   controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
   
   centerRow: { flexDirection: 'row', alignItems: 'center' },
