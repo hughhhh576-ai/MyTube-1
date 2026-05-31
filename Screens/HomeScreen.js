@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, Platform, Dimensions, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, Platform, Dimensions, RefreshControl, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
-import * as NavigationBar from 'expo-navigation-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import SettingsScreen from '../Settings/SettingsScreen';
@@ -155,10 +154,22 @@ export default function HomeScreen({ route }) {
     );
   };
 
-  const MeMenuItem = ({ icon, text, onPress }) => (
-    <TouchableOpacity style={styles.meMenuItem} onPress={onPress}>
-      <Ionicons name={icon} size={24} color="#00BFA5" style={styles.meMenuIcon} />
-      <Text style={styles.meMenuText}>{text}</Text>
+  // [NEW] Updated ME Menu Item Component according to screenshot UI
+  const MeMenuCard = ({ icon, iconBg, iconColor, title, subtitle, badge, onPress }) => (
+    <TouchableOpacity style={styles.meMenuCard} activeOpacity={0.8} onPress={onPress}>
+      <View style={[styles.meMenuIconBox, { backgroundColor: iconBg }]}>
+        <Ionicons name={icon} size={22} color={iconColor} />
+      </View>
+      <View style={styles.meMenuTextContent}>
+        <Text style={styles.meMenuTitle}>{title}</Text>
+        <Text style={styles.meMenuSubtitle}>{subtitle}</Text>
+      </View>
+      {badge ? (
+        <View style={styles.meMenuBadge}>
+          <Text style={styles.meMenuBadgeText}>{badge}</Text>
+        </View>
+      ) : null}
+      <Ionicons name="chevron-forward" size={18} color="#555" style={{ marginLeft: 8 }} />
     </TouchableOpacity>
   );
 
@@ -184,7 +195,6 @@ export default function HomeScreen({ route }) {
   
        {activeTab === 'Home' ? (
           loading && videos.length === 0 ? ( 
-            // [NEW] Skeleton Loading UI
             <View style={{ paddingTop: 10 }}>
               {[1, 2, 3].map((key) => (
                 <View key={key} style={styles.skeletonCard}>
@@ -218,26 +228,48 @@ export default function HomeScreen({ route }) {
         ) : activeTab === 'Settings' ? (
           <SettingsScreen />
         ) : activeTab === 'ME' ? (
+          
+          // [NEW] Updated ME Screen UI without My Account section
           <View style={styles.meContainer}>
-             <View style={styles.meHeaderProfile}>
-                 <Ionicons name="person-circle" size={80} color="#555" />
-                 <Text style={styles.meName}>MyTube User</Text>
-                 <Text style={styles.meEmail}>Manage your account</Text>
-             </View>
-  
-            <View style={styles.meMenuWrapper}>
-                 <MeMenuItem icon="time-outline" text="HISTORY" onPress={() => navigation.navigate('History')} />
-                 <MeMenuItem icon="download-outline" text="DOWNLOAD" onPress={() => navigation.navigate('Downloads')} />
-                 <MeMenuItem icon="notifications-outline" text="MY SUBSCRIBE" onPress={() => navigation.navigate('Subscriptions')} />
-                 <MeMenuItem icon="list-outline" text="MY PLAYLIST" onPress={() => navigation.navigate('Playlist')} />
-                 <MeMenuItem icon="settings-outline" text="SETTINGS" onPress={() => setActiveTab('Settings')} />
-                 <MeMenuItem icon="mail-outline" text="SUPPORT TO GMAIL" onPress={() => {}} />
-             </View>
+            <Text style={styles.meSectionTitle}>MENU</Text>
+            
+            <ScrollView contentContainerStyle={styles.meMenuWrapper} showsVerticalScrollIndicator={false}>
+               <MeMenuCard 
+                  icon="time" iconBg="rgba(255, 152, 0, 0.12)" iconColor="#FF9800" 
+                  title="History" subtitle="Recently watched videos" badge="24"
+                  onPress={() => navigation.navigate('History')} 
+               />
+               <MeMenuCard 
+                  icon="download" iconBg="rgba(76, 175, 80, 0.12)" iconColor="#4CAF50" 
+                  title="Download" subtitle="Offline saved videos" badge="7"
+                  onPress={() => navigation.navigate('Downloads')} 
+               />
+               <MeMenuCard 
+                  icon="logo-youtube" iconBg="rgba(244, 67, 54, 0.12)" iconColor="#F44336" 
+                  title="My Subscribe" subtitle="Channels you follow" badge="12"
+                  onPress={() => navigation.navigate('Subscriptions')} 
+               />
+               <MeMenuCard 
+                  icon="list" iconBg="rgba(103, 58, 183, 0.12)" iconColor="#8E24AA" 
+                  title="My Playlist" subtitle="Your curated collections" badge="5"
+                  onPress={() => navigation.navigate('Playlist')} 
+               />
+               <MeMenuCard 
+                  icon="settings-sharp" iconBg="rgba(158, 158, 158, 0.12)" iconColor="#9E9E9E" 
+                  title="Settings" subtitle="App preferences & privacy" 
+                  onPress={() => setActiveTab('Settings')} 
+               />
+               <MeMenuCard 
+                  icon="mail" iconBg="rgba(3, 169, 244, 0.12)" iconColor="#03A9F4" 
+                  title="Support to Gmail" subtitle="Contact us for help" 
+                  onPress={() => {}} 
+               />
+            </ScrollView>
           </View>
+          
         ) : null}
       </View>
 
-      {/* [NEW] Updated Bottom Tab Bar matching the screenshot UI */}
       <View style={styles.tabBar}>
         <TouchableOpacity onPress={async () => { setActiveTab('Home'); setActiveQuery(await getAlgorithmicTopic()); }} style={styles.tab}>
            {activeTab === 'Home' && <View style={styles.activeTabLine} />}
@@ -275,7 +307,6 @@ const styles = StyleSheet.create({
   searchBar: { flex: 1, flexDirection: 'row', backgroundColor: '#222', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
   mainContent: { flex: 1, backgroundColor: '#0F0F0F' },
   
-  // Video Card Styles
   videoCard: { marginBottom: 15 },
   thumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#111' },
   durationBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(0, 0, 0, 0.8)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
@@ -286,7 +317,6 @@ const styles = StyleSheet.create({
   title: { color: '#FFF', fontSize: 14, fontWeight: '500' },
   meta: { color: '#AAA', fontSize: 12, marginTop: 4 },
 
-  // Skeleton Loading Styles
   skeletonCard: { backgroundColor: '#18181b', borderRadius: 12, overflow: 'hidden', marginHorizontal: 10, marginBottom: 20 },
   skeletonThumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#27272a' },
   skeletonInfo: { flexDirection: 'row', padding: 12, alignItems: 'center' },
@@ -295,19 +325,20 @@ const styles = StyleSheet.create({
   skeletonTitle: { height: 14, backgroundColor: '#27272a', borderRadius: 4, marginBottom: 10, width: '90%' },
   skeletonMeta: { height: 12, backgroundColor: '#27272a', borderRadius: 4, width: '60%' },
 
-  // Bottom Tab Bar Styles
   tabBar: { flexDirection: 'row', height: 55, borderTopWidth: 1, borderTopColor: '#1a1a1a', backgroundColor: '#0a0a0a', paddingBottom: 5 },
   tab: { flex: 1, justifyContent: 'center', alignItems: 'center', position: 'relative' },
   activeTabLine: { position: 'absolute', top: -1, width: '40%', height: 2, backgroundColor: '#FF0000', borderBottomLeftRadius: 2, borderBottomRightRadius: 2 },
   tabText: { fontSize: 10, color: '#666', marginTop: 4, fontWeight: '500' },
 
-  // ME Screen Styles
-  meContainer: { flex: 1, backgroundColor: '#0F0F0F' },
-  meHeaderProfile: { alignItems: 'center', marginTop: 40, marginBottom: 30 },
-  meName: { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginTop: 10 },
-  meEmail: { color: '#AAA', fontSize: 14, marginTop: 4 },
-  meMenuWrapper: { paddingHorizontal: 20 },
-  meMenuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: '#222' },
-  meMenuIcon: { marginRight: 20 },
-  meMenuText: { color: '#FFF', fontSize: 16, fontWeight: '500' }
+  // [NEW] ME Screen Styles matching the screenshot
+  meContainer: { flex: 1, backgroundColor: '#0F0F0F', paddingTop: 20 },
+  meSectionTitle: { color: '#666', fontSize: 12, fontWeight: 'bold', letterSpacing: 1.5, marginLeft: 20, marginBottom: 15 },
+  meMenuWrapper: { paddingHorizontal: 16, paddingBottom: 20 },
+  meMenuCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#15171a', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#1f2229' },
+  meMenuIconBox: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  meMenuTextContent: { flex: 1 },
+  meMenuTitle: { color: '#FFF', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  meMenuSubtitle: { color: '#888', fontSize: 12 },
+  meMenuBadge: { backgroundColor: '#FF3B30', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  meMenuBadgeText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' }
 });

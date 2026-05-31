@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, ActivityIndicator, BackHandler } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,19 +13,16 @@ global.appSettings.shortsCacheLimit = global.appSettings.shortsCacheLimit || 360
 const MY_API_SERVER = "http://127.0.0.1:10000";
 
 export default function SettingsScreen() {
-  const [isMainQualityExpanded, setIsMainQualityExpanded] = useState(false);
+  // 'main' | 'longVideo' | 'shortVideo' | 'location' | 'cacheLimit'
+  const [currentView, setCurrentView] = useState('main'); 
+
   const [selectedMainQuality, setSelectedMainQuality] = useState(global.appSettings.normalVideo);
-
-  const [isShortQualityExpanded, setIsShortQualityExpanded] = useState(false);
   const [selectedShortQuality, setSelectedShortQuality] = useState(global.shortVideoQuality);
-
-  const [isLocationExpanded, setIsLocationExpanded] = useState(false);
+  
   const [downloadLocations, setDownloadLocations] = useState([{ label: 'Phone Memory', path: '/storage/emulated/0/MyTube' }]);
   const [selectedLocation, setSelectedLocation] = useState(global.appSettings.downloadLocation);
-
-  const [isCacheLimitExpanded, setIsCacheLimitExpanded] = useState(false);
+  
   const [selectedCacheLimit, setSelectedCacheLimit] = useState(global.appSettings.shortsCacheLimit);
-
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
@@ -53,6 +50,19 @@ export default function SettingsScreen() {
       }).catch(e => console.log(e));
   }, []);
 
+  // হার্ডওয়্যার ব্যাক বাটন হ্যান্ডেল করার জন্য (Android)
+  useEffect(() => {
+    const backAction = () => {
+      if (currentView !== 'main') {
+        setCurrentView('main');
+        return true;
+      }
+      return false;
+    };
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [currentView]);
+
   const longVideoOptions = [
       'Auto', '75p', '144p', '240p', '360p', '480p', '720p', '1080p', '1440p (2K)', '2160p (4K)', '4320p (8K)'
   ];
@@ -71,6 +81,7 @@ export default function SettingsScreen() {
       { label: '24 Hours', value: 86400000, chip: '24h' }
   ];
 
+  // অপশন সিলেক্ট করার পর সেভ করে মেইন স্ক্রিনে ফিরে আসবে
   const handleMainQualitySelect = (res) => {
     setIsLoading(true); 
     setTimeout(() => {
@@ -78,6 +89,7 @@ export default function SettingsScreen() {
       setSelectedMainQuality(res);
       DeviceEventEmitter.emit('qualityChanged', res);
       setIsLoading(false); 
+      setCurrentView('main');
     }, 800);
   };
 
@@ -89,7 +101,10 @@ export default function SettingsScreen() {
       await AsyncStorage.setItem('shortVideoQuality', res); 
     } catch (e) {}
 
-    setTimeout(() => setIsLoading(false), 800);
+    setTimeout(() => {
+      setIsLoading(false);
+      setCurrentView('main');
+    }, 800);
   };
 
   const handleLocationSelect = (path) => {
@@ -100,8 +115,12 @@ export default function SettingsScreen() {
           global.appSettings.downloadLocation = path;
           setSelectedLocation(path);
           setIsLoading(false);
+          setCurrentView('main');
         })
-        .catch(() => setIsLoading(false));
+        .catch(() => {
+          setIsLoading(false);
+          setCurrentView('main');
+        });
     }, 800);
   };
 
@@ -111,6 +130,7 @@ export default function SettingsScreen() {
       global.appSettings.shortsCacheLimit = val;
       setSelectedCacheLimit(val);
       setIsLoading(false);
+      setCurrentView('main');
     }, 800);
   };
 
@@ -151,22 +171,21 @@ export default function SettingsScreen() {
     return { badge: 'Opt', type: 'auto', desc: '' };
   };
 
-  const SectionCard = ({ icon, iconBg, title, subtitle, expanded, onPress, children }) => (
-    <View style={[styles.section, expanded && styles.sectionExpanded]}>
-      <TouchableOpacity activeOpacity={0.8} style={styles.sectionHeader} onPress={onPress}>
-        <View style={[styles.sectionIcon, { backgroundColor: iconBg }]}>
-          <Ionicons name={icon} size={20} color="#FFF" />
-        </View>
-        <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={styles.sectionTitle}>{title}</Text>
-          <Text style={styles.sectionSubtitle}>{subtitle}</Text>
-        </View>
-        <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={20} color="#7b8db0" />
-      </TouchableOpacity>
-      {expanded && <View style={styles.optionsList}>{children}</View>}
-    </View>
+  // Main Screen Card Component
+  const MainMenuCard = ({ icon, iconBg, title, subtitle, onPress }) => (
+    <TouchableOpacity activeOpacity={0.8} style={styles.mainMenuCard} onPress={onPress}>
+      <View style={[styles.sectionIcon, { backgroundColor: iconBg }]}>
+        <Ionicons name={icon} size={20} color="#FFF" />
+      </View>
+      <View style={{ flex: 1, marginLeft: 12 }}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        <Text style={styles.sectionSubtitle}>{subtitle}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={20} color="#7b8db0" />
+    </TouchableOpacity>
   );
 
+  // Sub-screen Option Item
   const OptionItem = ({ label, desc, badge, badgeType, customBadge, selected, onPress }) => {
     const bStyle = getBadgeStyle(badgeType);
     return (
@@ -193,106 +212,151 @@ export default function SettingsScreen() {
     );
   };
 
+  // সাব-স্ক্রিনের হেডার
+  const SubScreenHeader = ({ title }) => (
+    <View style={styles.subScreenHeader}>
+      <TouchableOpacity style={styles.backButton} onPress={() => setCurrentView('main')}>
+        <Ionicons name="arrow-back" size={24} color="#e8edf8" />
+      </TouchableOpacity>
+      <Text style={styles.subScreenTitle}>{title}</Text>
+      <View style={{ width: 40 }} />
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>⚙️ Video Settings</Text>
-          <Text style={styles.headerSubtitle}>আপনার পছন্দমতো কাস্টমাইজ করুন</Text>
+      
+      {/* ---------------- MAIN VIEW ---------------- */}
+      {currentView === 'main' && (
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>⚙️ Video Settings</Text>
+            <Text style={styles.headerSubtitle}>আপনার পছন্দমতো কাস্টমাইজ করুন</Text>
+          </View>
+
+          <View style={styles.settingsContainer}>
+            <MainMenuCard 
+              icon="tv-outline" iconBg="#1a3a6e" title="Long Video Quality" subtitle={selectedMainQuality}
+              onPress={() => setCurrentView('longVideo')}
+            />
+            <MainMenuCard 
+              icon="phone-portrait-outline" iconBg="#2d1a5c" title="Shorts Video Quality" subtitle={selectedShortQuality}
+              onPress={() => setCurrentView('shortVideo')}
+            />
+            <MainMenuCard 
+              icon="folder-open-outline" iconBg="#0d3d28" title="Download Location" subtitle={selectedLocation.split('/').pop() || 'MyTube'}
+              onPress={() => setCurrentView('location')}
+            />
+            <MainMenuCard 
+              icon="time-outline" iconBg="#3d2200" title="Shorts Cache Limit" subtitle="ক্যাশ সময়সীমা নির্ধারণ করুন"
+              onPress={() => setCurrentView('cacheLimit')}
+            />
+          </View>
+          <Text style={styles.bottomNote}>সেটিংস স্বয়ংক্রিয়ভাবে সংরক্ষিত হয়</Text>
+        </ScrollView>
+      )}
+
+      {/* ---------------- LONG VIDEO SUB-SCREEN ---------------- */}
+      {currentView === 'longVideo' && (
+        <View style={{ flex: 1 }}>
+          <SubScreenHeader title="Long Video Quality" />
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.subListContent}>
+            <View style={styles.optionsWrapper}>
+              {longVideoOptions.map((opt, index) => {
+                const conf = getLongConfig(opt);
+                return (
+                  <View key={index}>
+                    <OptionItem 
+                      label={opt.replace(' (2K)', '').replace(' (4K)', '').replace(' (8K)', '')} 
+                      desc={conf.desc} badge={conf.badge} badgeType={conf.type}
+                      selected={selectedMainQuality === opt} onPress={() => handleMainQualitySelect(opt)} 
+                    />
+                    {index < longVideoOptions.length - 1 && <View style={styles.optionDivider} />}
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
         </View>
+      )}
 
-        <View style={styles.settingsContainer}>
-          
-          {/* 1. Long Video Quality */}
-          <SectionCard 
-            icon="tv-outline" iconBg="#1a3a6e" title="Long Video Quality" subtitle="স্বাভাবিক ভিডিওর মান নির্বাচন করুন"
-            expanded={isMainQualityExpanded} onPress={() => setIsMainQualityExpanded(!isMainQualityExpanded)}
-          >
-            {longVideoOptions.map((opt, index) => {
-              const conf = getLongConfig(opt);
-              return (
-                <View key={index}>
-                  <OptionItem 
-                    label={opt.replace(' (2K)', '').replace(' (4K)', '').replace(' (8K)', '')} 
-                    desc={conf.desc} badge={conf.badge} badgeType={conf.type}
-                    selected={selectedMainQuality === opt} onPress={() => handleMainQualitySelect(opt)} 
-                  />
-                  {index < longVideoOptions.length - 1 && <View style={styles.optionDivider} />}
-                </View>
-              );
-            })}
-          </SectionCard>
-
-          {/* 2. Shorts Video Quality */}
-          <SectionCard 
-            icon="phone-portrait-outline" iconBg="#2d1a5c" title="Shorts Video Quality" subtitle="শর্টস ভিডিওর মান নির্বাচন করুন"
-            expanded={isShortQualityExpanded} onPress={() => setIsShortQualityExpanded(!isShortQualityExpanded)}
-          >
-            {shortVideoOptions.map((opt, index) => {
-              const conf = getShortConfig(opt);
-              return (
-                <View key={index}>
-                  <OptionItem 
-                    label={opt} desc={conf.desc} badge={conf.badge} badgeType={conf.type}
-                    selected={selectedShortQuality === opt} onPress={() => handleShortQualitySelect(opt)} 
-                  />
-                  {index < shortVideoOptions.length - 1 && <View style={styles.optionDivider} />}
-                </View>
-              );
-            })}
-          </SectionCard>
-
-          {/* 3. Download Location */}
-          <SectionCard 
-            icon="folder-open-outline" iconBg="#0d3d28" title="Download Location" subtitle="ডাউনলোড ফোল্ডার বেছে নিন"
-            expanded={isLocationExpanded} onPress={() => setIsLocationExpanded(!isLocationExpanded)}
-          >
-            {downloadLocations.map((loc, index) => {
-              const isPhone = loc.label.includes('Phone');
-              const CustomIcon = () => (
-                <View style={styles.storageIconWrapper}>
-                  <Text style={{ fontSize: 16 }}>{isPhone ? '📱' : '📂'}</Text>
-                </View>
-              );
-              return (
-                <View key={index}>
-                  <OptionItem 
-                    label={loc.label} desc={isPhone ? 'ডিভাইসের অভ্যন্তরীণ স্টোরেজ' : loc.path} 
-                    customBadge={<CustomIcon />} selected={selectedLocation === loc.path} onPress={() => handleLocationSelect(loc.path)} 
-                  />
-                  {index < downloadLocations.length - 1 && <View style={styles.optionDivider} />}
-                </View>
-              );
-            })}
-          </SectionCard>
-
-          {/* 4. Shorts Cache Limit */}
-          <SectionCard 
-            icon="time-outline" iconBg="#3d2200" title="Shorts Cache Limit Time" subtitle="শর্টস ভিডিও ক্যাশ সময়সীমা"
-            expanded={isCacheLimitExpanded} onPress={() => setIsCacheLimitExpanded(!isCacheLimitExpanded)}
-          >
-            {cacheLimitOptions.map((opt, index) => {
-              const CustomTimeChip = () => (
-                <View style={styles.timeChip}>
-                  <Text style={styles.timeChipText}>{opt.chip}</Text>
-                </View>
-              );
-              return (
-                <View key={index}>
-                  <OptionItem 
-                    label={opt.label.replace(' (Default)', '')} desc="" 
-                    customBadge={<CustomTimeChip />} selected={selectedCacheLimit === opt.value} onPress={() => handleCacheLimitSelect(opt.value)} 
-                  />
-                  {index < cacheLimitOptions.length - 1 && <View style={styles.optionDivider} />}
-                </View>
-              );
-            })}
-          </SectionCard>
-
+      {/* ---------------- SHORT VIDEO SUB-SCREEN ---------------- */}
+      {currentView === 'shortVideo' && (
+        <View style={{ flex: 1 }}>
+          <SubScreenHeader title="Shorts Video Quality" />
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.subListContent}>
+            <View style={styles.optionsWrapper}>
+              {shortVideoOptions.map((opt, index) => {
+                const conf = getShortConfig(opt);
+                return (
+                  <View key={index}>
+                    <OptionItem 
+                      label={opt} desc={conf.desc} badge={conf.badge} badgeType={conf.type}
+                      selected={selectedShortQuality === opt} onPress={() => handleShortQualitySelect(opt)} 
+                    />
+                    {index < shortVideoOptions.length - 1 && <View style={styles.optionDivider} />}
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
         </View>
-        <Text style={styles.bottomNote}>সেটিংস স্বয়ংক্রিয়ভাবে সংরক্ষিত হয়</Text>
-      </ScrollView>
+      )}
+
+      {/* ---------------- DOWNLOAD LOCATION SUB-SCREEN ---------------- */}
+      {currentView === 'location' && (
+        <View style={{ flex: 1 }}>
+          <SubScreenHeader title="Download Location" />
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.subListContent}>
+            <View style={styles.optionsWrapper}>
+              {downloadLocations.map((loc, index) => {
+                const isPhone = loc.label.includes('Phone');
+                const CustomIcon = () => (
+                  <View style={styles.storageIconWrapper}>
+                    <Text style={{ fontSize: 16 }}>{isPhone ? '📱' : '📂'}</Text>
+                  </View>
+                );
+                return (
+                  <View key={index}>
+                    <OptionItem 
+                      label={loc.label} desc={isPhone ? 'ডিভাইসের অভ্যন্তরীণ স্টোরেজ' : loc.path} 
+                      customBadge={<CustomIcon />} selected={selectedLocation === loc.path} onPress={() => handleLocationSelect(loc.path)} 
+                    />
+                    {index < downloadLocations.length - 1 && <View style={styles.optionDivider} />}
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
+        </View>
+      )}
+
+      {/* ---------------- CACHE LIMIT SUB-SCREEN ---------------- */}
+      {currentView === 'cacheLimit' && (
+        <View style={{ flex: 1 }}>
+          <SubScreenHeader title="Cache Limit Time" />
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.subListContent}>
+            <View style={styles.optionsWrapper}>
+              {cacheLimitOptions.map((opt, index) => {
+                const CustomTimeChip = () => (
+                  <View style={styles.timeChip}>
+                    <Text style={styles.timeChipText}>{opt.chip}</Text>
+                  </View>
+                );
+                return (
+                  <View key={index}>
+                    <OptionItem 
+                      label={opt.label.replace(' (Default)', '')} desc="" 
+                      customBadge={<CustomTimeChip />} selected={selectedCacheLimit === opt.value} onPress={() => handleCacheLimitSelect(opt.value)} 
+                    />
+                    {index < cacheLimitOptions.length - 1 && <View style={styles.optionDivider} />}
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
+        </View>
+      )}
 
       {isLoading && (
         <View style={styles.loadingOverlay}>
@@ -314,19 +378,21 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#e8edf8', letterSpacing: 0.5 },
   headerSubtitle: { fontSize: 12, color: '#4a5568', marginTop: 4 },
   
-  settingsContainer: { paddingHorizontal: 16, gap: 16 },
+  settingsContainer: { paddingHorizontal: 16, gap: 12 },
   
-  section: { backgroundColor: '#161c2d', borderWidth: 1, borderColor: '#1e2a42', borderRadius: 16, overflow: 'hidden', marginBottom: 16 },
-  sectionExpanded: { borderColor: 'rgba(61,139,255,0.25)' },
+  mainMenuCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#161c2d', borderWidth: 1, borderColor: '#1e2a42', borderRadius: 16, paddingVertical: 16, paddingHorizontal: 16 },
+  sectionIcon: { width: 38, height: 38, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  sectionTitle: { fontSize: 15, fontWeight: '600', color: '#e8edf8' },
+  sectionSubtitle: { fontSize: 12, color: '#7b8db0', marginTop: 4 },
   
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#1a1f30' },
-  sectionIcon: { width: 34, height: 34, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  sectionTitle: { fontSize: 14, fontWeight: '600', color: '#e8edf8' },
-  sectionSubtitle: { fontSize: 11, color: '#7b8db0', marginTop: 2 },
+  subScreenHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 15, backgroundColor: '#161c2d', borderBottomWidth: 1, borderBottomColor: '#1e2a42' },
+  backButton: { padding: 10 },
+  subScreenTitle: { fontSize: 16, fontWeight: 'bold', color: '#e8edf8' },
+  subListContent: { padding: 16, paddingBottom: 40 },
   
-  optionsList: { paddingVertical: 6 },
+  optionsWrapper: { backgroundColor: '#161c2d', borderRadius: 16, borderWidth: 1, borderColor: '#1e2a42', overflow: 'hidden' },
   
-  optionItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, paddingHorizontal: 16, position: 'relative' },
+  optionItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 16, position: 'relative' },
   optionItemSelected: { backgroundColor: 'rgba(61,139,255,0.06)' },
   activeIndicatorLine: { position: 'absolute', left: 0, top: '20%', bottom: '20%', width: 3, backgroundColor: '#3d8bff', borderTopRightRadius: 3, borderBottomRightRadius: 3 },
   
@@ -335,9 +401,9 @@ const styles = StyleSheet.create({
   qualityBadge: { minWidth: 46, paddingVertical: 3, paddingHorizontal: 8, borderRadius: 5, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   qualityBadgeText: { fontSize: 11, fontWeight: 'bold' },
   
-  optionLabel: { fontSize: 13.5, color: '#e8edf8' },
+  optionLabel: { fontSize: 14, color: '#e8edf8' },
   optionLabelSelected: { color: '#c8d8ff', fontWeight: 'bold' },
-  optionDesc: { fontSize: 11, color: '#7b8db0', marginTop: 2 },
+  optionDesc: { fontSize: 11, color: '#7b8db0', marginTop: 3 },
   
   radioOuter: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#1e2a42', justifyContent: 'center', alignItems: 'center' },
   radioOuterSelected: { borderColor: '#3d8bff' },
