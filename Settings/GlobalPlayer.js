@@ -22,7 +22,7 @@ const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
-// 🚨 [FIX] Getter-Only এরর সমাধানের জন্য সেফটি ফাংশন তৈরি করা হলো 🚨
+// সেফটি ফাংশন
 const safeSeek = (p, targetSec) => {
     if (!p) return;
     try {
@@ -111,7 +111,7 @@ export default function GlobalPlayer() {
     const setupAudio = async () => {
       try {
         await setAudioModeAsync({
-          staysActiveInBackground: true,
+          staysActiveInBackground: true, // 🚨 লক স্ক্রিনের জন্য এটি অত্যন্ত জরুরি
           playsInSilentModeIOS: true,
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false,
@@ -131,9 +131,13 @@ export default function GlobalPlayer() {
   const player = useVideoPlayer(videoSource, (p) => {
     if (!videoSource) return; 
     try { p.loop = false; } catch(e) {}
-    safeSetRate(p, currentSpeed); // 🚨 Getter এরর সলভড
-    if (streamModeRef.current === 'separate') {
-        safeSetMuted(p, true); // 🚨 Getter এরর সলভড
+    safeSetRate(p, currentSpeed);
+    
+    // 🚨 [Lock Screen Magic] অডিও মোডে থাকলে মিউট অফ রাখতে হবে যেন expo-video সাউন্ড প্লে করে
+    if (streamModeRef.current === 'separate' && !isAudioModeRef.current) {
+        safeSetMuted(p, true); 
+    } else {
+        safeSetMuted(p, false);
     }
   });
 
@@ -146,12 +150,8 @@ export default function GlobalPlayer() {
   useEffect(() => {
     const appStateSub = AppState.addEventListener('change', async (nextAppState) => {
         if (nextAppState.match(/inactive|background/)) {
-            if (!isAudioModeRef.current) {
-                if (player && player.playing) player.pause();
-                if (syncAudioRef.current && syncAudioRef.current.playing) {
-                    syncAudioRef.current.pause();
-                }
-            }
+            // 🚨 [NEW] লক স্ক্রিন ও ব্যাকগ্রাউন্ড প্লেব্যাক সচল রাখার জন্য pause() রিমুভ করা হয়েছে।
+            // OS নিজে থেকেই expo-video এর Media Session ধরে রাখবে এবং নোটিফিকেশন দেখাবে।
         }
     });
     return () => appStateSub.remove();
@@ -185,7 +185,6 @@ export default function GlobalPlayer() {
           return true;
       } else if (playerState === 'center' || playerState === 'full') {
           setPlayerState('mini');
-          
           const state = navigation.getState();
           if (state && state.routes) {
               const routes = state.routes;
@@ -233,13 +232,10 @@ export default function GlobalPlayer() {
   const seekTo = async (newTime) => {
       setCurrentTime(newTime); 
       try {
-          if (isAudioModeRef.current) {
-              safeSeek(syncAudioRef.current, newTime); // 🚨 Getter এরর সলভড
-          } else {
-              safeSeek(player, newTime); // 🚨 Getter এরর সলভড
-              if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-                  safeSeek(syncAudioRef.current, newTime); 
-              }
+          safeSeek(player, newTime); 
+          // শুধু ভিডিও মোডেই অডিও আলাদাভাবে সিংক হবে 
+          if (!isAudioModeRef.current && streamModeRef.current === 'separate' && syncAudioRef.current) {
+              safeSeek(syncAudioRef.current, newTime); 
           }
       } catch (error) { console.log("Seek Error: ", error); }
   };
@@ -286,45 +282,37 @@ export default function GlobalPlayer() {
       if (mode) {
           resumeTimeRef.current = player ? player.currentTime : currentTime;
           if (player) player.pause();
-          setVideoSource(null); 
           setIsPlayingUI(true); 
 
-          if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-              if (!syncAudioRef.current.playing) syncAudioRef.current.play();
-          } else {
-              let audioUrlToPlay = cachedAudioUrlRef.current;
-              if (!audioUrlToPlay) {
-                  try {
-                      const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&action=play&type=audio`);
-                      const json = await res.json();
-                      if (json.success && (json.audioUrl || json.url)) {
-                          audioUrlToPlay = json.audioUrl || json.url;
-                          cachedAudioUrlRef.current = audioUrlToPlay; 
-                      }
-                  } catch (e) {}
-              }
-              if (audioUrlToPlay) {
-                  safeReleaseAudio();
-                  syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
-                  pendingSeekRef.current = resumeTimeRef.current; 
-                  safeSetRate(syncAudioRef.current, currentSpeed); // 🚨 Getter এরর সলভড
-                  syncAudioRef.current.play();
-              }
+          let audioUrlToPlay = cachedAudioUrlRef.current;
+          if (!audioUrlToPlay) {
+              try {
+                  const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&action=play&type=audio`);
+                  const json = await res.json();
+                  if (json.success && (json.audioUrl || json.url)) {
+                      audioUrlToPlay = json.audioUrl || json.url;
+                      cachedAudioUrlRef.current = audioUrlToPlay; 
+                  }
+              } catch (e) {}
+          }
+          
+          if (audioUrlToPlay) {
+              safeReleaseAudio();
+              // 🚨 [Lock Screen Magic] অডিও ফাইলটিও expo-video দিয়ে প্লে করা হচ্ছে, যেন লক স্ক্রিন নোটিফিকেশন কাজ করে
+              setVideoSource(audioUrlToPlay); 
+              pendingSeekRef.current = resumeTimeRef.current; 
           }
       } else {
-          let resumeVideoTime = resumeTimeRef.current;
-
-          if (syncAudioRef.current) {
-              resumeVideoTime = syncAudioRef.current.currentTime;
-              if (streamModeRef.current !== 'separate') {
-                  safeReleaseAudio();
-              } else {
-                  syncAudioRef.current.pause();
-              }
-          }
-
-          resumeTimeRef.current = resumeVideoTime;
+          resumeTimeRef.current = player ? player.currentTime : currentTime;
+          if (player) player.pause();
+          
           setVideoSource(streamUrl); 
+
+          if (streamModeRef.current === 'separate' && cachedAudioUrlRef.current) {
+              safeReleaseAudio();
+              syncAudioRef.current = createAudioPlayer(cachedAudioUrlRef.current);
+              safeSetRate(syncAudioRef.current, currentSpeed);
+          }
       }
     });
 
@@ -336,23 +324,23 @@ export default function GlobalPlayer() {
 
   useEffect(() => {
       let timeoutId;
-      if (!isAudioMode && videoSource && player) {
+      if (videoSource && player) {
           timeoutId = setTimeout(async () => {
               try {
                   if (resumeTimeRef.current > 0) {
-                      safeSeek(player, resumeTimeRef.current); // 🚨 Getter এরর সলভড
+                      safeSeek(player, resumeTimeRef.current);
                   }
                   player.play();
 
-                  if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-                      safeSeek(syncAudioRef.current, resumeTimeRef.current); // 🚨 Getter এরর সলভড
+                  if (!isAudioMode && streamModeRef.current === 'separate' && syncAudioRef.current) {
+                      safeSeek(syncAudioRef.current, resumeTimeRef.current); 
                       syncAudioRef.current.play();
                   }
               } catch (e) {}
           }, 800); 
       }
       return () => clearTimeout(timeoutId);
-  }, [videoSource, isAudioMode]);
+  }, [videoSource, isAudioMode, player]);
 
   const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
     try {
@@ -390,14 +378,14 @@ export default function GlobalPlayer() {
     if (json.audioUrl && streamModeRef.current === 'separate') {
         safeReleaseAudio();
         syncAudioRef.current = createAudioPlayer(json.audioUrl);
-        safeSetVolume(syncAudioRef.current, 1.0); // 🚨 Getter এরর সলভড
-        safeSetRate(syncAudioRef.current, currentSpeed); // 🚨 Getter এরর সলভড
+        safeSetVolume(syncAudioRef.current, 1.0); 
+        safeSetRate(syncAudioRef.current, currentSpeed); 
         syncAudioRef.current.play();
     }
   };
 
   const handleSkip = async (amount, isSilent = false) => {
-      let currentPosition = isAudioMode ? currentTime : (player ? player.currentTime : currentTime);
+      let currentPosition = player ? player.currentTime : currentTime;
       let newTime = currentPosition + amount;
       
       if (newTime < 0) newTime = 0;
@@ -430,8 +418,8 @@ export default function GlobalPlayer() {
 
   const changeSpeed = async (speed) => {
       setCurrentSpeed(speed);
-      safeSetRate(player, speed); // 🚨 Getter এরর সলভড
-      safeSetRate(syncAudioRef.current, speed); // 🚨 Getter এরর সলভড
+      safeSetRate(player, speed); 
+      if (syncAudioRef.current) safeSetRate(syncAudioRef.current, speed); 
       setShowSpeedMenu(false);
       setShowSettingsMenu(false);
   };
@@ -439,54 +427,40 @@ export default function GlobalPlayer() {
   useEffect(() => {
     const interval = setInterval(async () => {
         if (isSyncingRef.current) return; 
+        isSyncingRef.current = true;
 
-        if (isAudioMode) {
-            isSyncingRef.current = true;
-            try {
-                const isAudioReady = syncAudioRef.current && (syncAudioRef.current.duration > 0 || syncAudioRef.current.playing);
-                if (isAudioReady) {
-                    setIsPlayingUI(syncAudioRef.current.playing);
-
-                    if (pendingSeekRef.current !== null) {
-                        safeSeek(syncAudioRef.current, pendingSeekRef.current); // 🚨 Getter এরর সলভড
-                        setCurrentTime(pendingSeekRef.current);
-                        pendingSeekRef.current = null;
-                    } else if (!isSlidingRef.current) {
-                        setCurrentTime(syncAudioRef.current.currentTime);
-                        if (syncAudioRef.current.duration > 0) setDuration(syncAudioRef.current.duration);
-                    }
-                }
-            } catch(e) {}
-            isSyncingRef.current = false;
-        } else {
+        try {
             setIsPlayingUI(player?.playing || false);
-            
+
             if (player) {
-                if (!isSlidingRef.current && (player.currentTime > 0 || player.playing)) {
+                if (pendingSeekRef.current !== null) {
+                    safeSeek(player, pendingSeekRef.current);
+                    setCurrentTime(pendingSeekRef.current);
+                    pendingSeekRef.current = null;
+                } else if (!isSlidingRef.current && (player.currentTime > 0 || player.playing)) {
                     setCurrentTime(player.currentTime);
                     if (player.duration > 0) setDuration(player.duration);
                 }
             }
 
-            if (streamMode === 'separate' && videoSource) {
-                isSyncingRef.current = true;
-                try {
-                    const isAudioReady = syncAudioRef.current && (syncAudioRef.current.duration > 0 || syncAudioRef.current.playing);
-                    if (isAudioReady) {
-                        if (player && player.playing) {
-                            const diff = Math.abs(player.currentTime - syncAudioRef.current.currentTime);
-                            if (diff > 1.5) { 
-                                safeSeek(syncAudioRef.current, player.currentTime); // 🚨 Getter এরর সলভড
-                            }
-                            if (!syncAudioRef.current.playing) syncAudioRef.current.play();
-                        } else {
-                            if (syncAudioRef.current.playing) syncAudioRef.current.pause();
+            // 🚨 Separate audio track sync (শুধুমাত্র ভিডিও মোডে থাকলে)
+            if (!isAudioMode && streamMode === 'separate' && videoSource && syncAudioRef.current) {
+                const isAudioReady = syncAudioRef.current.duration > 0 || syncAudioRef.current.playing;
+                if (isAudioReady) {
+                    if (player && player.playing) {
+                        const diff = Math.abs(player.currentTime - syncAudioRef.current.currentTime);
+                        if (diff > 1.5) { 
+                            safeSeek(syncAudioRef.current, player.currentTime); 
                         }
+                        if (!syncAudioRef.current.playing) syncAudioRef.current.play();
+                    } else {
+                        if (syncAudioRef.current.playing) syncAudioRef.current.pause();
                     }
-                } catch(e) {}
-                isSyncingRef.current = false;
+                }
             }
-        }
+        } catch(e) {}
+
+        isSyncingRef.current = false;
     }, 1000);
     return () => clearInterval(interval);
   }, [player, streamMode, isAudioMode, videoSource]);
@@ -615,7 +589,8 @@ export default function GlobalPlayer() {
                         player={player} 
                         style={styles.video} 
                         contentFit="contain"
-                        nativeControls={false} 
+                        nativeControls={false}
+                        allowsPictureInPicture // PiP মোড সাপোর্ট করার জন্য
                     />
                 ) : null}
             </Animated.View>
@@ -632,7 +607,7 @@ export default function GlobalPlayer() {
                         ব্যাকগ্রাউন্ড অডিও মোড চলছে
                     </Text>
                     <Text style={{ color: '#DDD', marginTop: 5, fontSize: 12 }}>
-                        ভিডিও পুরোপুরি বন্ধ আছে (ডাটা সাশ্রয়ী)
+                        লক স্ক্রিন থেকেও নিয়ন্ত্রণ করা যাবে
                     </Text>
                 </View>
             )}
@@ -652,18 +627,13 @@ export default function GlobalPlayer() {
              
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={async () => {
-                    if (isAudioMode) {
-                        if (syncAudioRef.current) {
-                            if (syncAudioRef.current.playing) syncAudioRef.current.pause();
-                            else syncAudioRef.current.play();
-                        }
-                    } else if (player) {
+                    if (player) {
                         if (player.playing) {
                             player.pause();
-                            if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
+                            if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
                         } else {
                             player.play();
-                            if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
+                            if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
                         }
                     }
                     triggerControls();
@@ -807,18 +777,13 @@ export default function GlobalPlayer() {
             }}>
                 <View style={styles.miniControlsRow}>
                     <TouchableOpacity style={styles.miniCtrlBtn} onPress={async () => {
-                        if (isAudioMode) {
-                            if (syncAudioRef.current) {
-                                if (syncAudioRef.current.playing) syncAudioRef.current.pause();
-                                else syncAudioRef.current.play();
-                            }
-                        } else if (player) {
+                        if (player) {
                             if (player.playing) {
                                 player.pause();
-                                if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
+                                if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
                             } else {
                                 player.play();
-                                if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
+                                if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
                             }
                         }
                     }}>
