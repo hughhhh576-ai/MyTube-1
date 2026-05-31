@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
-// 🚨 [FIXED]: expo-av সম্পূর্ণ সরিয়ে শুধুমাত্র expo-audio ব্যবহার করা হলো
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; 
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
@@ -28,6 +27,41 @@ const MINI_WIDTH = PORTRAIT_WIDTH * 0.45;
 const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
+
+// 🚨 [FIXED]: Getter-Only এররগুলো সমাধানের জন্য সেফটি ফাংশন (ক্র্যাশ এড়াতে) 🚨
+const safeSeek = (p, targetSec) => {
+    if (!p) return;
+    try {
+        if (typeof p.seekTo === 'function') p.seekTo(targetSec);
+        else if (typeof p.seekBy === 'function') p.seekBy(targetSec - p.currentTime);
+        else p.currentTime = targetSec; 
+    } catch (e) {}
+};
+
+const safeSetRate = (p, rate) => {
+    if (!p) return;
+    try {
+        if (typeof p.setPlaybackRate === 'function') p.setPlaybackRate(rate);
+        else if (typeof p.setRate === 'function') p.setRate(rate);
+        else p.playbackRate = rate;
+    } catch (e) {}
+};
+
+const safeSetVolume = (p, vol) => {
+    if (!p) return;
+    try {
+        if (typeof p.setVolume === 'function') p.setVolume(vol);
+        else p.volume = vol;
+    } catch(e) {}
+};
+
+const safeSetMuted = (p, isMuted) => {
+    if (!p) return;
+    try {
+        if (typeof p.setMuted === 'function') p.setMuted(isMuted);
+        else p.muted = isMuted;
+    } catch(e) {}
+};
 
 export default function GlobalPlayer() {
   const navigation = useNavigation();
@@ -74,6 +108,7 @@ export default function GlobalPlayer() {
   const isAudioModeRef = useRef(false);
   const streamModeRef = useRef('combined');
   const cachedAudioUrlRef = useRef(null); 
+  const pendingSeekRef = useRef(null); 
   const isSyncingRef = useRef(false);
 
   useEffect(() => {
@@ -97,21 +132,21 @@ export default function GlobalPlayer() {
       }
   };
 
-  // 🚨 [FIXED]: SDK 56-এর জন্য প্লেয়ার সেটআপ এবং অটো-প্লে লজিক
+  // 🚨 [FIXED]: প্লেয়ার রেডি হওয়া এবং অটো প্লে (কোনো এরর ছাড়াই)
   const player = useVideoPlayer(videoSource, (p) => {
     if (!videoSource) return; 
-    try { 
-        p.loop = false; 
-        p.playbackRate = currentSpeed;
-        if (streamModeRef.current === 'separate') p.muted = true;
-        p.play(); // সোর্স লোড হওয়ার সাথে সাথেই প্লে শুরু হবে
-    } catch(e) {}
+    try { p.loop = false; } catch(e) {}
+    safeSetRate(p, currentSpeed);
+    if (streamModeRef.current === 'separate') {
+        safeSetMuted(p, true);
+    }
+    try { p.play(); } catch(e) {}
   });
 
   const triggerControls = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 4000); // ৪ সেকেন্ড পর কন্ট্রোল হাইড হবে
+    controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 4000);
   };
 
   useEffect(() => {
@@ -219,6 +254,7 @@ export default function GlobalPlayer() {
       setIsAudioMode(false);
       isAudioModeRef.current = false;
       cachedAudioUrlRef.current = null;
+      pendingSeekRef.current = null;
       
       setCurrentTime(0);
       scale.setValue(1);
@@ -262,8 +298,8 @@ export default function GlobalPlayer() {
               if (audioUrlToPlay) {
                   safeReleaseAudio();
                   syncAudioRef.current = createAudioPlayer(audioUrlToPlay);
-                  syncAudioRef.current.currentTime = resumeTimeRef.current;
-                  syncAudioRef.current.playbackRate = currentSpeed;
+                  pendingSeekRef.current = resumeTimeRef.current; 
+                  safeSetRate(syncAudioRef.current, currentSpeed);
                   syncAudioRef.current.play();
               }
           }
@@ -290,19 +326,18 @@ export default function GlobalPlayer() {
     };
   }, [isFullscreen, streamUrl]);
 
-  // 🚨 [FIXED]: প্লেয়ার রেডি হওয়ার সাথে সাথে গ্যারান্টিড প্লেব্যাক
   useEffect(() => {
       let timeoutId;
       if (!isAudioMode && videoSource && player) {
           timeoutId = setTimeout(() => {
               try {
                   if (resumeTimeRef.current > 0) {
-                      player.currentTime = resumeTimeRef.current;
+                      safeSeek(player, resumeTimeRef.current);
                       if (streamModeRef.current === 'separate' && syncAudioRef.current) {
-                          syncAudioRef.current.currentTime = resumeTimeRef.current;
+                          safeSeek(syncAudioRef.current, resumeTimeRef.current);
                       }
                   }
-                  if (!player.playing) player.play();
+                  if (typeof player.play === 'function') player.play();
                   if (streamModeRef.current === 'separate' && syncAudioRef.current && !syncAudioRef.current.playing) {
                       syncAudioRef.current.play();
                   }
@@ -348,8 +383,8 @@ export default function GlobalPlayer() {
     if (json.audioUrl && streamModeRef.current === 'separate') {
         safeReleaseAudio();
         syncAudioRef.current = createAudioPlayer(json.audioUrl);
-        syncAudioRef.current.volume = 1.0; 
-        syncAudioRef.current.playbackRate = currentSpeed; 
+        safeSetVolume(syncAudioRef.current, 1.0); 
+        safeSetRate(syncAudioRef.current, currentSpeed); 
         syncAudioRef.current.play();
     }
   };
@@ -365,11 +400,11 @@ export default function GlobalPlayer() {
       if (newTime > duration) newTime = duration;
       
       if (isAudioMode && syncAudioRef.current) {
-          syncAudioRef.current.currentTime = newTime;
+          safeSeek(syncAudioRef.current, newTime);
       } else if (player) {
-          player.currentTime = newTime;
+          safeSeek(player, newTime);
           if (streamMode === 'separate' && syncAudioRef.current) {
-              syncAudioRef.current.currentTime = newTime;
+              safeSeek(syncAudioRef.current, newTime);
           }
       }
       
@@ -400,17 +435,12 @@ export default function GlobalPlayer() {
 
   const changeSpeed = (speed) => {
       setCurrentSpeed(speed);
-      if (player) {
-          try { player.playbackRate = speed; } catch(e){}
-      }
-      if (syncAudioRef.current) {
-          try { syncAudioRef.current.playbackRate = speed; } catch(e){}
-      }
+      safeSetRate(player, speed);
+      if (syncAudioRef.current) safeSetRate(syncAudioRef.current, speed);
       setShowSpeedMenu(false);
       setShowSettingsMenu(false);
   };
 
-  // 🚨 [FIXED]: সিঙ্ক অপ্টিমাইজেশন (শুধুমাত্র expo-audio ব্যবহার করে)
   useEffect(() => {
     const interval = setInterval(() => {
         if (isSyncingRef.current) return; 
@@ -420,7 +450,12 @@ export default function GlobalPlayer() {
             try {
                 if (syncAudioRef.current) {
                     setIsPlayingUI(syncAudioRef.current.playing);
-                    if (!isSlidingRef.current) {
+                    
+                    if (pendingSeekRef.current !== null) {
+                        safeSeek(syncAudioRef.current, pendingSeekRef.current);
+                        setCurrentTime(pendingSeekRef.current);
+                        pendingSeekRef.current = null;
+                    } else if (!isSlidingRef.current) {
                         setCurrentTime(syncAudioRef.current.currentTime);
                         if (syncAudioRef.current.duration > 0) setDuration(syncAudioRef.current.duration);
                     }
@@ -442,7 +477,7 @@ export default function GlobalPlayer() {
                     if (player && player.playing) {
                         const diff = Math.abs(player.currentTime - syncAudioRef.current.currentTime);
                         if (diff > 0.8) { 
-                            syncAudioRef.current.currentTime = player.currentTime; 
+                            safeSeek(syncAudioRef.current, player.currentTime);
                         }
                         if (!syncAudioRef.current.playing) syncAudioRef.current.play();
                     } else {
@@ -464,10 +499,10 @@ export default function GlobalPlayer() {
       } else if (player) {
           try {
               if (player.playing) {
-                  player.pause();
+                  if (typeof player.pause === 'function') player.pause();
                   if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
               } else {
-                  player.play();
+                  if (typeof player.play === 'function') player.play();
                   if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
               }
           } catch(e) {}
@@ -559,7 +594,7 @@ export default function GlobalPlayer() {
       if (isFullscreen) await toggleFullscreen();
       setStreamUrl(null);
       setVideoSource(null); 
-      try { if (player) player.pause(); } catch(e) {}
+      try { if (player && typeof player.pause === 'function') player.pause(); } catch(e) {}
       safeReleaseAudio();
   };
 
@@ -584,48 +619,46 @@ export default function GlobalPlayer() {
         ]} 
         {...(!isInteractiveFull ? miniPanResponder.panHandlers : {})}
     >
+      {/* 🚨 [FIXED]: একদম আপনার আগের মতো সিম্পল লেআউট 🚨 */}
       <View style={styles.videoWrapper}>
         
-        {/* 🚨 ১. সবার নিচের লেয়ার: ভিডিও (VideoView থেকে key সরিয়ে দেওয়া হয়েছে) 🚨 */}
         {streamUrl && !fallbackData && (
-          <View style={StyleSheet.absoluteFillObject}>
-            <Animated.View style={[StyleSheet.absoluteFillObject, { transform: [{ scale: scale }] }]}>
-                {videoSource ? (
-                    <VideoView 
-                        ref={videoViewRef} 
-                        player={player} 
-                        style={styles.video} 
-                        contentFit="contain"
-                        nativeControls={false} 
-                    />
-                ) : null}
-            </Animated.View>
+          <Animated.View style={[StyleSheet.absoluteFillObject, { transform: [{ scale: scale }] }]}>
+              {videoSource ? (
+                  <VideoView 
+                      ref={videoViewRef} 
+                      player={player} 
+                      style={styles.video} 
+                      contentFit="contain"
+                      nativeControls={false} 
+                  />
+              ) : null}
 
-            {isAudioMode && (
-                <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
-                    <Image 
-                        source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
-                        style={[StyleSheet.absoluteFillObject, { opacity: 0.2 }]}
-                        resizeMode="cover"
-                    />
-                    <Ionicons name="headset" size={70} color="#00BFA5" />
-                    <Text style={{ color: '#00BFA5', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>ব্যাকগ্রাউন্ড অডিও মোড চলছে</Text>
-                </View>
-            )}
-          </View>
+              {isAudioMode && (
+                  <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
+                      <Image 
+                          source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
+                          style={[StyleSheet.absoluteFillObject, { opacity: 0.2 }]}
+                          resizeMode="cover"
+                      />
+                      <Ionicons name="headset" size={70} color="#00BFA5" />
+                      <Text style={{ color: '#00BFA5', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>ব্যাকগ্রাউন্ড অডিও মোড চলছে</Text>
+                  </View>
+              )}
+          </Animated.View>
         )}
 
-        {/* 🚨 ২. মাঝখানের লেয়ার: ডাবল ট্যাপ স্কিপ 🚨 */}
+        {/* 🚨 ডাবল ট্যাপ স্কিপ 🚨 */}
         {isInteractiveFull && !fallbackData && (
-            <View style={[StyleSheet.absoluteFillObject, { flexDirection: 'row' }]} {...videoPanResponder.panHandlers}>
+            <View style={styles.tapOverlay} {...videoPanResponder.panHandlers}>
                 <TouchableOpacity activeOpacity={1} style={styles.tapHalf} onPress={() => handleTap('left')} />
                 <TouchableOpacity activeOpacity={1} style={styles.tapHalf} onPress={() => handleTap('right')} />
             </View>
         )}
 
-        {/* 🚨 ৩. সবার উপরের লেয়ার: প্লে/পজ এবং সেটিংস কন্ট্রোল 🚨 */}
+        {/* 🚨 ভিডিওর ওপরের কন্ট্রোল, বাটন এবং সেটিং 🚨 */}
         {isInteractiveFull && showControls && !fallbackData && (
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }]} pointerEvents="box-none">
+          <View style={styles.controls} pointerEvents="box-none">
              
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={togglePlayPause}>
@@ -650,11 +683,11 @@ export default function GlobalPlayer() {
                       onValueChange={(v) => setCurrentTime(v)} 
                       onSlidingComplete={(v) => {
                           if (isAudioMode && syncAudioRef.current) {
-                              syncAudioRef.current.currentTime = v;
+                              safeSeek(syncAudioRef.current, v);
                           } else if (player) {
-                              player.currentTime = v;
+                              safeSeek(player, v);
                               if (streamMode === 'separate' && syncAudioRef.current) {
-                                  syncAudioRef.current.currentTime = v;
+                                  safeSeek(syncAudioRef.current, v);
                               }
                           }
                           isSlidingRef.current = false; 
@@ -791,10 +824,13 @@ const styles = StyleSheet.create({
   centerContainer: { position: 'absolute', top: 0, left: 0, width: PORTRAIT_WIDTH, height: PORTRAIT_HEIGHT, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
   
-  // 🚨 [FIXED SDK 56]: কোন zIndex বা elevation দেয়া হয়নি, সিরিয়াল অনুযায়ী লেয়ারিং হবে
-  videoWrapper: { flex: 1, backgroundColor: '#000', overflow: 'hidden', position: 'relative' },
+  // 🚨 [FIXED]: কোনো এক্সট্রা লেয়ার ছাড়াই সরাসরি ভিডিওর ওপরে 🚨
+  videoWrapper: { flex: 1, backgroundColor: '#000', overflow: 'hidden' },
   video: { flex: 1, width: '100%', height: '100%' },
+  
+  tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 50, elevation: 50 }, 
   tapHalf: { flex: 1, height: '100%' },
+  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 100, elevation: 100 },
   
   centerRow: { flexDirection: 'row', alignItems: 'center' },
   bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15 },
