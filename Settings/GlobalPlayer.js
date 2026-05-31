@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, Linking, AppState, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; 
 import { Ionicons } from '@expo/vector-icons';
@@ -10,7 +10,6 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as WebBrowser from 'expo-web-browser'; 
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
-// 🚨 [FIXED]: স্ক্রিনশটের ওয়ার্নিংগুলো যেন আর না দেখায় তার জন্য ইগনোর লিস্টে যুক্ত করা হলো
 LogBox.ignoreLogs([
   'Video component', 
   'expo-audio', 
@@ -29,7 +28,6 @@ const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
-// 🚨 সেফটি ফাংশন (ক্র্যাশ এড়ানোর জন্য) 🚨
 const safeSeek = (p, targetSec) => {
     if (!p) return;
     try {
@@ -112,7 +110,6 @@ export default function GlobalPlayer() {
   const cachedAudioUrlRef = useRef(null); 
   const pendingSeekRef = useRef(null); 
   
-  // 🚨 CPU সেভার: একই সাথে একাধিক সিঙ্ক কমান্ড যেন না যায় 🚨
   const isSyncingRef = useRef(false);
 
   useEffect(() => {
@@ -124,7 +121,7 @@ export default function GlobalPlayer() {
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false,
         });
-      } catch (e) { console.log("Audio Setup Error:", e); }
+      } catch (e) {}
     };
     setupAudio();
   }, []);
@@ -233,7 +230,7 @@ export default function GlobalPlayer() {
             scale.setValue(1); 
             baseScaleRef.current = 1;
         }
-    } catch (error) { console.log(error); }
+    } catch (error) {}
   };
 
   const syncAudioWithVideo = (targetPositionSeconds) => {
@@ -360,9 +357,7 @@ export default function GlobalPlayer() {
                       safeSeek(syncAudioRef.current, resumeTimeRef.current); 
                       syncAudioRef.current.play();
                   }
-              } catch (e) {
-                  console.log("Playback start error:", e);
-              }
+              } catch (e) {}
           }, 800); 
       }
       return () => clearTimeout(timeoutId);
@@ -463,7 +458,6 @@ export default function GlobalPlayer() {
       setShowSettingsMenu(false);
   };
 
-  // 🚨 CPU সেভার সিঙ্ক অপ্টিমাইজেশন 🚨
   useEffect(() => {
     const interval = setInterval(async () => {
         if (isSyncingRef.current) return; 
@@ -627,7 +621,6 @@ export default function GlobalPlayer() {
 
   if (playerState === 'hidden') return null;
   const isInteractiveFull = playerState === 'full' || playerState === 'center' || playerState === 'fullscreen';
-
   const bufferedWidth = duration > 0 ? `${(buffered / duration) * 100}%` : '0%';
 
   return (
@@ -643,9 +636,9 @@ export default function GlobalPlayer() {
     >
       <View style={styles.videoWrapper}>
         
+        {/* 🚨 [FIXED SDK 56]: Video Layer (zIndex 1) 🚨 */}
         {streamUrl && !fallbackData && (
-          <View style={{ flex: 1, width: '100%', height: '100%' }}>
-            
+          <View style={styles.videoLayer}>
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <VideoView 
@@ -660,36 +653,31 @@ export default function GlobalPlayer() {
             </Animated.View>
 
             {isAudioMode && (
-                <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', zIndex: 2, backgroundColor: '#000' }]}>
+                <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
                     <Image 
                         source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
                         style={[StyleSheet.absoluteFillObject, { opacity: 0.2 }]}
                         resizeMode="cover"
                     />
                     <Ionicons name="headset" size={70} color="#00BFA5" />
-                    <Text style={{ color: '#00BFA5', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>
-                        ব্যাকগ্রাউন্ড অডিও মোড চলছে
-                    </Text>
-                    <Text style={{ color: '#DDD', marginTop: 5, fontSize: 12 }}>
-                        ভিডিও পুরোপুরি বন্ধ আছে (ডাটা সাশ্রয়ী)
-                    </Text>
+                    <Text style={{ color: '#00BFA5', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>ব্যাকগ্রাউন্ড অডিও মোড</Text>
                 </View>
             )}
-
           </View>
         )}
 
+        {/* 🚨 [FIXED SDK 56]: Tap Overlay Layer (zIndex 50) 🚨 */}
         {isInteractiveFull && !fallbackData && (
             <View style={styles.tapOverlay} {...videoPanResponder.panHandlers}>
-                <TouchableWithoutFeedback onPress={() => handleTap('left')}><View style={styles.tapHalf} /></TouchableWithoutFeedback>
-                <TouchableWithoutFeedback onPress={() => handleTap('right')}><View style={styles.tapHalf} /></TouchableWithoutFeedback>
+                <TouchableOpacity activeOpacity={1} style={styles.tapHalf} onPress={() => handleTap('left')} />
+                <TouchableOpacity activeOpacity={1} style={styles.tapHalf} onPress={() => handleTap('right')} />
             </View>
         )}
 
+        {/* 🚨 [FIXED SDK 56]: Controls Layer (zIndex 100) 🚨 */}
         {isInteractiveFull && showControls && !fallbackData && (
           <View style={styles.controls} pointerEvents="box-none">
              
-             {/* 🚨 মূল প্লে/পজ লজিক আপনার আগের মতোই 🚨 */}
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={async () => {
                     if (isAudioMode) {
@@ -706,7 +694,7 @@ export default function GlobalPlayer() {
                                 if (typeof player.play === 'function') player.play();
                                 if (streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
                             }
-                        } catch(e) { console.log("Player toggle error:", e); }
+                        } catch(e) {}
                     }
                     triggerControls();
                 }}>
@@ -714,7 +702,6 @@ export default function GlobalPlayer() {
                 </TouchableOpacity>
              </View>
 
-             {/* 🚨 আপনার অরিজিনাল UI: সেটিংস আইকন বটম বারে 🚨 */}
              <View style={styles.bottomBar}>
                 <Text style={styles.timeTextLeft}>{formatTime(currentTime)}</Text>
                 
@@ -750,7 +737,6 @@ export default function GlobalPlayer() {
 
                 <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
                 
-                {/* 🚨 আপনার অরিজিনাল সেটিং আইকন 🚨 */}
                 <TouchableOpacity style={{marginLeft: 12}} onPress={() => setShowSettingsMenu(true)}>
                     <Ionicons name="settings-outline" size={22} color="#FFF" />
                 </TouchableOpacity>
@@ -803,9 +789,7 @@ export default function GlobalPlayer() {
                             } else {
                                 alert("ভিডিওটি আগে থেকেই প্লেলিস্টে আছে!");
                             }
-                        } catch(e) {
-                            alert("সেভ করতে সমস্যা হয়েছে।");
-                        }
+                        } catch(e) {}
                     }}>
                         <Ionicons name="add-circle-outline" size={20} color="#FFF" style={styles.menuIcon} />
                         <Text style={styles.menuText}>Save to Playlist</Text>
@@ -893,14 +877,16 @@ const styles = StyleSheet.create({
   centerContainer: { position: 'absolute', top: 0, left: 0, width: PORTRAIT_WIDTH, height: PORTRAIT_HEIGHT, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
   
-  videoWrapper: { flex: 1, justifyContent: 'center', width: '100%', height: '100%' },
+  // 🚨 [SDK 56 FIX]: Wrapper এবং Layering স্ট্রাকচার আপডেট করা হয়েছে 🚨
+  videoWrapper: { flex: 1, justifyContent: 'center', width: '100%', height: '100%', position: 'relative' },
+  videoLayer: { ...StyleSheet.absoluteFillObject, zIndex: 1, elevation: 1, backgroundColor: '#000' },
   animatedVideoWrapper: { flex: 1, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }, 
   video: { flex: 1, width: '100%', height: '100%' },
   
-  // 🚨 [FIXED]: অ্যান্ড্রয়েডে আইকন ভাসিয়ে রাখার জন্য elevation যুক্ত করা হলো 🚨
-  tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 5, elevation: 5 }, 
-  tapHalf: { flex: 1 },
-  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 10, elevation: 10 },
+  // 🚨 [SDK 56 FIX]: Tap ও Controls এর জন্য প্রচুর zIndex ও elevation দেওয়া হয়েছে 🚨
+  tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 50, elevation: 50 }, 
+  tapHalf: { flex: 1, height: '100%' },
+  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 100, elevation: 100 },
   
   centerRow: { flexDirection: 'row', alignItems: 'center', zIndex: 20 },
   bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, zIndex: 20 },
