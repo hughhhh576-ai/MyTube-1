@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Image, Platform } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, Linking, AppState, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; 
 import { Ionicons } from '@expo/vector-icons';
@@ -10,7 +10,6 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as WebBrowser from 'expo-web-browser'; 
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
-// 🚨 [FIXED]: নতুন টাচ এররটি ইগনোর লিস্টে যুক্ত করা হলো
 LogBox.ignoreLogs([
   'Video component', 
   'expo-audio', 
@@ -217,11 +216,6 @@ export default function GlobalPlayer() {
     const backHandler = BackHandler.addEventListener('hardwareBackPress', handleSmartBack);
     return () => backHandler.remove();
   }, [playerState, navigation, isFullscreen]);
-
-  useEffect(() => {
-      Animated.spring(scale, { toValue: 1, useNativeDriver: false }).start();
-      baseScaleRef.current = 1;
-  }, [playerState]);
 
   const toggleFullscreen = async () => {
     try {
@@ -518,9 +512,9 @@ export default function GlobalPlayer() {
       triggerControls();
   };
 
-  // 🚨 [FIXED]: Touch Conflict ঠিক করা হয়েছে 🚨
+  // 🚨 [FIXED]: টাচ কনফ্লিক্ট ঠিক করা হয়েছে 🚨
   const videoPanResponder = useRef(PanResponder.create({
-      onStartShouldSetPanResponder: () => true, // 🚨 এখন PanResponder নিজেই ট্যাপ রিসিভ করবে
+      onStartShouldSetPanResponder: () => true, 
       onMoveShouldSetPanResponder: (evt, gestureState) => {
           const touches = evt.nativeEvent.touches;
           if (touches && touches.length >= 2) return true; 
@@ -570,7 +564,6 @@ export default function GlobalPlayer() {
                   return prev;
               });
           } 
-          // 🚨 [FIXED]: ট্যাপ হ্যান্ডলিং এখন সরাসরি এখান থেকে হবে
           else if (Math.abs(gestureState.dx) < 15 && Math.abs(gestureState.dy) < 15) {
               const currentWidth = Dimensions.get('window').width;
               const side = gestureState.x0 < (currentWidth / 2) ? 'left' : 'right';
@@ -632,8 +625,9 @@ export default function GlobalPlayer() {
     >
       <View style={styles.videoWrapper}>
         
+        {/* 🚨 [FIXED]: কোনো TextureView বা Transform ছাড়াই সরাসরি ভিডিও রেন্ডার করা হলো 🚨 */}
         {streamUrl && !fallbackData && (
-          <Animated.View style={[StyleSheet.absoluteFillObject, { transform: [{ scale: scale }] }]}>
+          <View style={StyleSheet.absoluteFillObject}>
               {videoSource ? (
                   <VideoView 
                       ref={videoViewRef} 
@@ -641,7 +635,6 @@ export default function GlobalPlayer() {
                       style={styles.video} 
                       contentFit="contain"
                       nativeControls={false} 
-                      surfaceType="textureView" 
                   />
               ) : null}
 
@@ -656,16 +649,17 @@ export default function GlobalPlayer() {
                       <Text style={{ color: '#00BFA5', marginTop: 15, fontSize: 16, fontWeight: 'bold' }}>ব্যাকগ্রাউন্ড অডিও মোড চলছে</Text>
                   </View>
               )}
-          </Animated.View>
+          </View>
         )}
 
-        {/* 🚨 [FIXED]: ভেতরের TouchableOpacity ডিলিট করে দেওয়া হয়েছে 🚨 */}
+        {/* 🚨 ডাবল ট্যাপ এবং জুমের লেয়ার 🚨 */}
         {isInteractiveFull && !fallbackData && (
-            <View style={styles.tapOverlay} {...videoPanResponder.panHandlers} />
+            <View style={[styles.tapOverlay, { elevation: 10, zIndex: 10 }]} {...videoPanResponder.panHandlers} />
         )}
 
+        {/* 🚨 ভিডিওর ওপরের কন্ট্রোল এবং বাটন 🚨 */}
         {isInteractiveFull && showControls && !fallbackData && (
-          <View style={styles.controls} pointerEvents="box-none">
+          <View style={[styles.controls, { elevation: 20, zIndex: 20 }]} pointerEvents="box-none">
              
              <View style={styles.centerRow} pointerEvents="box-none">
                 <TouchableOpacity onPress={togglePlayPause}>
@@ -832,12 +826,10 @@ const styles = StyleSheet.create({
   miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
   
   videoWrapper: { flex: 1, backgroundColor: '#000', overflow: 'hidden' },
-  animatedVideoWrapper: { flex: 1, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }, 
   video: { flex: 1, width: '100%', height: '100%' },
   
-  // 🚨 [FIXED]: tapOverlay এখন সম্পূর্ণ ক্লিন 🚨
-  tapOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 50 }, 
-  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
+  tapOverlay: { ...StyleSheet.absoluteFillObject }, 
+  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
   
   centerRow: { flexDirection: 'row', alignItems: 'center' },
   bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15 },
