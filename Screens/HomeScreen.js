@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, Platform, Dimensions, RefreshControl } from 'react-native';
+// 🚨 [FIXED]: react-native থেকে SafeAreaView সরানো হয়েছে
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, StatusBar, ActivityIndicator, Platform, Dimensions, RefreshControl } from 'react-native';
+// 🚨 [FIXED]: react-native-safe-area-context থেকে SafeAreaView ইমপোর্ট করা হয়েছে
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import * as NavigationBar from 'expo-navigation-bar';

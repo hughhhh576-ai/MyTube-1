@@ -2,6 +2,16 @@ import 'react-native-gesture-handler';
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
+// 🚨 [FIXED]: ওয়ার্নিং ইগনোর করার জন্য LogBox ইমপোর্ট করা হলো
+import { LogBox } from 'react-native';
+
+// 🚨 [FIXED]: স্ক্রিনশটের ওয়ার্নিংগুলো হাইড করা হলো
+LogBox.ignoreLogs([
+  'SafeAreaView has been deprecated',
+  'InteractionManager has been deprecated',
+  'Video component',
+  'expo-audio'
+]);
 
 // ==========================================
 // ১. Screens ফোল্ডার থেকে ফাইল ইমপোর্ট
@@ -40,12 +50,12 @@ export default function App() {
         <Stack.Screen name="Player" component={PlayerScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Playlist" component={PlaylistPage} options={{ headerShown: false }} />
         <Stack.Screen name="Shorts" component={ShortsScreen} options={{ headerShown: false }} />
-        
+
         {/* সেটিংস এবং হিস্টোরি */}
         <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
         <Stack.Screen name="History" component={HistoryPage} options={{ headerShown: false }} />
         <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ headerShown: false }} />
-        
+
         {/* সার্চ অপশনটি আপনার নির্দেশ অনুযায়ী পূর্ববর্তী ফিক্সের মতো রাখা হলো */}
         <Stack.Screen name="searchsettings" component={SearchSetting} options={{ headerShown: false }} />
 
