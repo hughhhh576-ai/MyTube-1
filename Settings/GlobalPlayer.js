@@ -522,6 +522,11 @@ export default function GlobalPlayer() {
       onMoveShouldSetPanResponder: (evt, gestureState) => {
           const touches = evt.nativeEvent.touches;
           if (touches && touches.length >= 2) return true; 
+
+          // 🚨 ফিক্স: নিচের দিকে (স্লাইডার এরিয়া) টাচ করলে PanResponder ব্লক করবে
+          if (gestureState.y0 > PLAYER_HEIGHT - 60 && !isFullscreen) return false;
+          if (gestureState.y0 > Dimensions.get('window').height - 80 && isFullscreen) return false;
+
           if (Math.abs(gestureState.dx) > 15 || Math.abs(gestureState.dy) > 15) return true; 
           return false;
       },
@@ -671,7 +676,8 @@ export default function GlobalPlayer() {
           <View style={styles.controls} pointerEvents="box-none">
              
              <View style={styles.centerRow} pointerEvents="box-none">
-                <TouchableOpacity onPress={togglePlayPause}>
+                {/* 🚨 ফিক্স: টাচ এরিয়া বড় করার জন্য প্যাডিং যুক্ত করা হলো */}
+                <TouchableOpacity onPress={togglePlayPause} style={{ padding: 20 }}>
                    <Ionicons name={isPlayingUI ? "pause-circle" : "play-circle"} size={75} color="#FFF" />
                 </TouchableOpacity>
              </View>
@@ -834,14 +840,16 @@ const styles = StyleSheet.create({
   centerContainer: { position: 'absolute', top: 0, left: 0, width: PORTRAIT_WIDTH, height: PORTRAIT_HEIGHT, zIndex: 9999, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   miniContainer: { position: 'absolute', bottom: 100, right: 20, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', borderRadius: 15, overflow: 'hidden', elevation: 10, borderWidth: 1, borderColor: '#00FF00' },
   
-  // 🚨 একদম আগের সিম্পল স্টাইল, কোনো জটিলতা ছাড়াই 🚨
   videoWrapper: { flex: 1, backgroundColor: '#000', overflow: 'hidden' },
   animatedVideoWrapper: { flex: 1, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }, 
   video: { flex: 1, width: '100%', height: '100%' },
   
-  tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 50 }, 
+  // 🚨 ফিক্স: tapOverlay তে elevation যুক্ত করা হলো 🚨
+  tapOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', zIndex: 50, elevation: 50 }, 
   tapHalf: { flex: 1, height: '100%' },
-  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
+  
+  // 🚨 ফিক্স: controls তে elevation যুক্ত করা হলো 🚨
+  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 100, elevation: 100 },
   
   centerRow: { flexDirection: 'row', alignItems: 'center' },
   bottomBar: { position: 'absolute', bottom: 5, width: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15 },
