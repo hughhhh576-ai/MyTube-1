@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, Platform, Dimensions, RefreshControl, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, StatusBar, ActivityIndicator, Platform, Dimensions, RefreshControl, ScrollView, Switch, DeviceEventEmitter } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -29,6 +29,8 @@ export default function HomeScreen({ route }) {
   const [subscribedChannels, setSubscribedChannels] = useState([]);
   const [thumbQuality, setThumbQuality] = useState('High');
   const [activeQuery, setActiveQuery] = useState('');
+  
+  const [isDarkMode, setIsDarkMode] = useState(true);
 
   const getAlgorithmicTopic = async () => {
     try {
@@ -54,6 +56,11 @@ export default function HomeScreen({ route }) {
         const quality = await AsyncStorage.getItem('thumbnailQuality');
         if (quality) setThumbQuality(quality);
         if (!activeQuery) setActiveQuery(await getAlgorithmicTopic());
+        
+        const savedTheme = await AsyncStorage.getItem('appTheme');
+        if (savedTheme !== null) {
+          setIsDarkMode(savedTheme === 'dark');
+        }
       } catch (e) {}
     };
     if (isFocused) loadGlobalData();
@@ -135,6 +142,15 @@ export default function HomeScreen({ route }) {
     } catch (e) {} finally { setLoading(false); setRefreshing(false); }
   };
 
+  const toggleDarkMode = async () => {
+    const newTheme = !isDarkMode;
+    setIsDarkMode(newTheme);
+    await AsyncStorage.setItem('appTheme', newTheme ? 'dark' : 'light');
+    DeviceEventEmitter.emit('themeChanged', newTheme);
+  };
+
+  const styles = getDynamicStyles(isDarkMode);
+
   const renderVideoItem = ({ item }) => {
     return (
       <View style={styles.videoCard}>
@@ -144,7 +160,14 @@ export default function HomeScreen({ route }) {
         </TouchableOpacity>
 
         <View style={styles.videoInfo}>
-          <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
+          {/* [NEW]: Channel Avatar-এর ওপর TouchableOpacity যোগ করা হয়েছে */}
+          <TouchableOpacity 
+            activeOpacity={0.8} 
+            onPress={() => navigation.navigate('Channel', { channelName: item.channel, channelAvatar: item.avatar })}
+          >
+            <Image source={{ uri: item.avatar }} style={styles.channelAvatar} />
+          </TouchableOpacity>
+          
           <View style={styles.textContainer}>
             <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
             <Text style={styles.meta}>{item.channel} • {item.views}</Text>
@@ -154,9 +177,8 @@ export default function HomeScreen({ route }) {
     );
   };
 
-  // [NEW] Updated ME Menu Item Component according to screenshot UI
-  const MeMenuCard = ({ icon, iconBg, iconColor, title, subtitle, badge, onPress }) => (
-    <TouchableOpacity style={styles.meMenuCard} activeOpacity={0.8} onPress={onPress}>
+  const MeMenuCard = ({ icon, iconBg, iconColor, title, subtitle, badge, onPress, isSwitch, switchValue, onSwitchChange }) => (
+    <TouchableOpacity style={styles.meMenuCard} activeOpacity={isSwitch ? 1 : 0.8} onPress={isSwitch ? null : onPress}>
       <View style={[styles.meMenuIconBox, { backgroundColor: iconBg }]}>
         <Ionicons name={icon} size={22} color={iconColor} />
       </View>
@@ -169,13 +191,23 @@ export default function HomeScreen({ route }) {
           <Text style={styles.meMenuBadgeText}>{badge}</Text>
         </View>
       ) : null}
-      <Ionicons name="chevron-forward" size={18} color="#555" style={{ marginLeft: 8 }} />
+      
+      {isSwitch ? (
+        <Switch 
+          value={switchValue} 
+          onValueChange={onSwitchChange} 
+          trackColor={{ false: '#d1d1d1', true: 'rgba(255, 0, 0, 0.5)' }} 
+          thumbColor={switchValue ? '#FF0000' : '#f4f3f4'} 
+        />
+      ) : (
+        <Ionicons name="chevron-forward" size={18} color={isDarkMode ? "#555" : "#AAA"} style={{ marginLeft: 8 }} />
+      )}
     </TouchableOpacity>
   );
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" translucent={true} />
+      <StatusBar backgroundColor={isDarkMode ? "#0F0F0F" : "#FFFFFF"} barStyle={isDarkMode ? "light-content" : "dark-content"} translucent={true} />
 
       {activeTab === 'Home' && (
         <View style={styles.header}>
@@ -185,8 +217,8 @@ export default function HomeScreen({ route }) {
           </View>
      
           <TouchableOpacity style={styles.searchBar} activeOpacity={0.8} onPress={() => navigation.navigate('searchsettings')}>
-            <Text style={{ flex: 1, color: '#888', fontSize: 14 }}>{searchQuery || "সার্চ..."}</Text>
-            <Ionicons name="search" size={18} color="#AAA" />
+            <Text style={{ flex: 1, color: isDarkMode ? '#888' : '#666', fontSize: 14 }}>{searchQuery || "সার্চ..."}</Text>
+            <Ionicons name="search" size={18} color={isDarkMode ? "#AAA" : "#888"} />
           </TouchableOpacity>
         </View>
       )}
@@ -229,7 +261,6 @@ export default function HomeScreen({ route }) {
           <SettingsScreen />
         ) : activeTab === 'ME' ? (
           
-          // [NEW] Updated ME Screen UI without My Account section
           <View style={styles.meContainer}>
             <Text style={styles.meSectionTitle}>MENU</Text>
             
@@ -259,10 +290,13 @@ export default function HomeScreen({ route }) {
                   title="Settings" subtitle="App preferences & privacy" 
                   onPress={() => setActiveTab('Settings')} 
                />
+               
                <MeMenuCard 
-                  icon="mail" iconBg="rgba(3, 169, 244, 0.12)" iconColor="#03A9F4" 
-                  title="Support to Gmail" subtitle="Contact us for help" 
-                  onPress={() => {}} 
+                  icon="moon" iconBg="rgba(33, 150, 243, 0.12)" iconColor="#2196F3" 
+                  title="Dark Mode" subtitle="Switch app theme" 
+                  isSwitch={true}
+                  switchValue={isDarkMode}
+                  onSwitchChange={toggleDarkMode}
                />
             </ScrollView>
           </View>
@@ -273,25 +307,25 @@ export default function HomeScreen({ route }) {
       <View style={styles.tabBar}>
         <TouchableOpacity onPress={async () => { setActiveTab('Home'); setActiveQuery(await getAlgorithmicTopic()); }} style={styles.tab}>
            {activeTab === 'Home' && <View style={styles.activeTabLine} />}
-           <Ionicons name={activeTab==='Home'?'home':'home-outline'} size={22} color={activeTab==='Home'?'#FF0000':'#666'} />
+           <Ionicons name={activeTab==='Home'?'home':'home-outline'} size={22} color={activeTab==='Home'?'#FF0000': (isDarkMode ? '#666' : '#999')} />
            <Text style={[styles.tabText, activeTab==='Home' && {color:'#FF0000'}]}>Home</Text>
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => setActiveTab('Shorts')} style={styles.tab}>
            {activeTab === 'Shorts' && <View style={styles.activeTabLine} />}
-           <Ionicons name={activeTab==='Shorts'?'play':'play-outline'} size={24} color={activeTab==='Shorts'?'#FF0000':'#666'} />
+           <Ionicons name={activeTab==='Shorts'?'play':'play-outline'} size={24} color={activeTab==='Shorts'?'#FF0000': (isDarkMode ? '#666' : '#999')} />
            <Text style={[styles.tabText, activeTab==='Shorts' && {color:'#FF0000'}]}>Shorts</Text>
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => setActiveTab('Live')} style={styles.tab}>
            {activeTab === 'Live' && <View style={styles.activeTabLine} />}
-           <Ionicons name={activeTab==='Live'?'radio':'radio-outline'} size={24} color={activeTab==='Live'?'#FF0000':'#666'} />
+           <Ionicons name={activeTab==='Live'?'radio':'radio-outline'} size={24} color={activeTab==='Live'?'#FF0000': (isDarkMode ? '#666' : '#999')} />
            <Text style={[styles.tabText, activeTab==='Live' && {color:'#FF0000'}]}>Live</Text>
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => setActiveTab('ME')} style={styles.tab}>
            {(activeTab === 'ME' || activeTab === 'Settings') && <View style={styles.activeTabLine} />}
-           <Ionicons name={(activeTab==='ME' || activeTab==='Settings') ? 'person' : 'person-outline'} size={22} color={(activeTab==='ME' || activeTab==='Settings') ? '#FF0000' : '#666'} />
+           <Ionicons name={(activeTab==='ME' || activeTab==='Settings') ? 'person' : 'person-outline'} size={22} color={(activeTab==='ME' || activeTab==='Settings') ? '#FF0000' : (isDarkMode ? '#666' : '#999')} />
            <Text style={[styles.tabText, (activeTab==='ME' || activeTab==='Settings') && {color:'#FF0000'}]}>ME</Text>
         </TouchableOpacity>
       </View>
@@ -299,46 +333,45 @@ export default function HomeScreen({ route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#222', width: '100%', backgroundColor: '#0F0F0F' },
+const getDynamicStyles = (isDark) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: isDark ? '#000' : '#F5F5F5', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: isDark ? '#222' : '#E0E0E0', width: '100%', backgroundColor: isDark ? '#0F0F0F' : '#FFFFFF' },
   logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
-  logoText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
-  searchBar: { flex: 1, flexDirection: 'row', backgroundColor: '#222', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
-  mainContent: { flex: 1, backgroundColor: '#0F0F0F' },
+  logoText: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
+  searchBar: { flex: 1, flexDirection: 'row', backgroundColor: isDark ? '#222' : '#F0F0F0', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
+  mainContent: { flex: 1, backgroundColor: isDark ? '#0F0F0F' : '#F9F9F9' },
   
   videoCard: { marginBottom: 15 },
-  thumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#111' },
-  durationBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(0, 0, 0, 0.8)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
+  thumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: isDark ? '#111' : '#EAEAEA' },
+  durationBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 },
   durationText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
   videoInfo: { flexDirection: 'row', padding: 12, alignItems: 'center' },
-  channelAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 12, backgroundColor: '#333' },
+  channelAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 12, backgroundColor: isDark ? '#333' : '#CCC' },
   textContainer: { flex: 1, paddingRight: 10 },
-  title: { color: '#FFF', fontSize: 14, fontWeight: '500' },
-  meta: { color: '#AAA', fontSize: 12, marginTop: 4 },
+  title: { color: isDark ? '#FFF' : '#000', fontSize: 14, fontWeight: '500' },
+  meta: { color: isDark ? '#AAA' : '#666', fontSize: 12, marginTop: 4 },
 
-  skeletonCard: { backgroundColor: '#18181b', borderRadius: 12, overflow: 'hidden', marginHorizontal: 10, marginBottom: 20 },
-  skeletonThumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#27272a' },
+  skeletonCard: { backgroundColor: isDark ? '#18181b' : '#FFFFFF', borderRadius: 12, overflow: 'hidden', marginHorizontal: 10, marginBottom: 20, borderWidth: isDark ? 0 : 1, borderColor: '#EEE' },
+  skeletonThumbnail: { width: '100%', aspectRatio: 16 / 9, backgroundColor: isDark ? '#27272a' : '#E0E0E0' },
   skeletonInfo: { flexDirection: 'row', padding: 12, alignItems: 'center' },
-  skeletonAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12, backgroundColor: '#27272a' },
+  skeletonAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12, backgroundColor: isDark ? '#27272a' : '#E0E0E0' },
   skeletonTextContainer: { flex: 1, justifyContent: 'center' },
-  skeletonTitle: { height: 14, backgroundColor: '#27272a', borderRadius: 4, marginBottom: 10, width: '90%' },
-  skeletonMeta: { height: 12, backgroundColor: '#27272a', borderRadius: 4, width: '60%' },
+  skeletonTitle: { height: 14, backgroundColor: isDark ? '#27272a' : '#E0E0E0', borderRadius: 4, marginBottom: 10, width: '90%' },
+  skeletonMeta: { height: 12, backgroundColor: isDark ? '#27272a' : '#E0E0E0', borderRadius: 4, width: '60%' },
 
-  tabBar: { flexDirection: 'row', height: 55, borderTopWidth: 1, borderTopColor: '#1a1a1a', backgroundColor: '#0a0a0a', paddingBottom: 5 },
+  tabBar: { flexDirection: 'row', height: 55, borderTopWidth: 1, borderTopColor: isDark ? '#1a1a1a' : '#E0E0E0', backgroundColor: isDark ? '#0a0a0a' : '#FFFFFF', paddingBottom: 5 },
   tab: { flex: 1, justifyContent: 'center', alignItems: 'center', position: 'relative' },
   activeTabLine: { position: 'absolute', top: -1, width: '40%', height: 2, backgroundColor: '#FF0000', borderBottomLeftRadius: 2, borderBottomRightRadius: 2 },
-  tabText: { fontSize: 10, color: '#666', marginTop: 4, fontWeight: '500' },
+  tabText: { fontSize: 10, color: isDark ? '#666' : '#999', marginTop: 4, fontWeight: '500' },
 
-  // [NEW] ME Screen Styles matching the screenshot
-  meContainer: { flex: 1, backgroundColor: '#0F0F0F', paddingTop: 20 },
-  meSectionTitle: { color: '#666', fontSize: 12, fontWeight: 'bold', letterSpacing: 1.5, marginLeft: 20, marginBottom: 15 },
+  meContainer: { flex: 1, backgroundColor: isDark ? '#0F0F0F' : '#F2F2F7', paddingTop: 20 },
+  meSectionTitle: { color: isDark ? '#666' : '#888', fontSize: 12, fontWeight: 'bold', letterSpacing: 1.5, marginLeft: 20, marginBottom: 15 },
   meMenuWrapper: { paddingHorizontal: 16, paddingBottom: 20 },
-  meMenuCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#15171a', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#1f2229' },
+  meMenuCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? '#15171a' : '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: isDark ? '#1f2229' : '#EAEAEA' },
   meMenuIconBox: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
   meMenuTextContent: { flex: 1 },
-  meMenuTitle: { color: '#FFF', fontSize: 16, fontWeight: '600', marginBottom: 4 },
-  meMenuSubtitle: { color: '#888', fontSize: 12 },
+  meMenuTitle: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  meMenuSubtitle: { color: isDark ? '#888' : '#666', fontSize: 12 },
   meMenuBadge: { backgroundColor: '#FF3B30', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   meMenuBadgeText: { color: '#FFF', fontSize: 12, fontWeight: 'bold' }
 });
