@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, BackHandler, TouchableWithoutFeedback, AppState, Image } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, BackHandler, Pressable, AppState, Image } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video'; 
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'; 
 import { Ionicons } from '@expo/vector-icons';
@@ -373,7 +373,6 @@ export default function GlobalPlayer() {
     }
   };
 
-  // সিঙ্গেল ট্যাপে কন্ট্রোল অন/অফ করার সিম্পল ফাংশন
   const handleVideoTap = () => {
       setShowControls(prev => {
           const next = !prev;
@@ -507,7 +506,7 @@ export default function GlobalPlayer() {
             </Animated.View>
 
             {isAudioMode && (
-                <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
+                <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', zIndex: 10, elevation: 10 }]}>
                     <Image 
                         source={{ uri: `https://img.youtube.com/vi/${currentVideoIdRef.current}/hqdefault.jpg` }}
                         style={[StyleSheet.absoluteFillObject, { opacity: 0.2 }]}
@@ -520,18 +519,19 @@ export default function GlobalPlayer() {
           </View>
         )}
 
-        {/* 🚨 ভিডিও ট্যাপ ওভারলে (যাতে ক্লিক করলে প্লে/পজ বাটন দেখা যায়) 🚨 */}
+        {/* 🚨 এক্সপো ৫৬ ফিক্স: Pressable, elevation এবং transparent background ব্যবহার করা হয়েছে 🚨 */}
         {isInteractiveFull && !fallbackData && (
-            <TouchableWithoutFeedback onPress={handleVideoTap}>
-                <View style={styles.tapOverlay} />
-            </TouchableWithoutFeedback>
+            <Pressable 
+                style={[StyleSheet.absoluteFillObject, { zIndex: 50, elevation: 50, backgroundColor: 'transparent' }]} 
+                onPress={handleVideoTap} 
+            />
         )}
 
-        {/* 🚨 শুধুমাত্র প্লে এবং পজ করার বাটন 🚨 */}
+        {/* 🚨 শুধুমাত্র প্লে এবং পজ করার বাটন, সাথে elevation ফিক্স 🚨 */}
         {isInteractiveFull && showControls && !fallbackData && (
-          <View style={styles.controls} pointerEvents="box-none">
+          <View style={[styles.controls, { zIndex: 100, elevation: 100 }]} pointerEvents="box-none">
              <View style={styles.centerRow} pointerEvents="box-none">
-                <TouchableOpacity onPress={togglePlayPause}>
+                <TouchableOpacity onPress={togglePlayPause} style={{ padding: 20 }}>
                    <Ionicons name={isPlayingUI ? "pause-circle" : "play-circle"} size={75} color="#FFF" />
                 </TouchableOpacity>
              </View>
@@ -539,7 +539,7 @@ export default function GlobalPlayer() {
         )}
 
         {fallbackData && (
-          <View style={styles.fallbackOverlay}>
+          <View style={[styles.fallbackOverlay, { zIndex: 200, elevation: 200 }]}>
             <Ionicons name="alert-circle" size={50} color="#FFD700" />
             <Text style={styles.fallbackText}>{fallbackData.message}</Text>
             <TouchableOpacity style={styles.btn} onPress={() => { startPlayback(fallbackData.data); setFallbackData(null); }}>
@@ -581,8 +581,7 @@ const styles = StyleSheet.create({
   animatedVideoWrapper: { flex: 1, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }, 
   video: { flex: 1, width: '100%', height: '100%' },
   
-  tapOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 50 }, 
-  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
+  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
   
   centerRow: { flexDirection: 'row', alignItems: 'center' },
   
