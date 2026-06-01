@@ -4,8 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// [NEW] Global Theme & Language Context Imports
 import { useTheme } from '../ThemeContext'; 
-import { useLanguage } from '../LanguageContext'; // [NEW] Language Context
+import { useLanguage } from '../LanguageContext'; 
 
 import SettingsScreen from '../Settings/SettingsScreen';
 import ShortsScreen from './ShortsScreen'; 
@@ -20,11 +21,12 @@ export default function HomeScreen({ route }) {
   const navigation = useNavigation();
   const isFocused = useIsFocused();
   
+  // [FIXED] গ্লোবাল থিম এবং ল্যাঙ্গুয়েজ হুক ব্যবহার করা হলো
   const { isDarkMode, toggleDarkMode } = useTheme();
-  const { locale, changeLanguage, t } = useLanguage(); // [NEW] Language Hook
+  const { locale, changeLanguage, t } = useLanguage(); 
 
   const [activeTab, setActiveTab] = useState('Home');
-  const [meView, setMeView] = useState('main'); // [NEW] ME tab sub-screen state
+  const [meView, setMeView] = useState('main'); 
 
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +68,6 @@ export default function HomeScreen({ route }) {
     if (activeQuery) fetchRealVideos(activeQuery, true);
   }, [activeQuery]);
 
-  // [NEW] Hardware Back Button Handling for ME tab
   useEffect(() => {
     const backAction = () => {
       if (activeTab === 'ME' && meView !== 'main') {
@@ -206,7 +207,6 @@ export default function HomeScreen({ route }) {
              <Text style={styles.logoText}>MyTube</Text>
           </View>
           <TouchableOpacity style={styles.searchBar} activeOpacity={0.8} onPress={() => navigation.navigate('searchsettings')}>
-            {/* [NEW] Search Text Translated */}
             <Text style={{ flex: 1, color: isDarkMode ? '#888' : '#666', fontSize: 14 }}>{searchQuery || t('search')}</Text>
             <Ionicons name="search" size={18} color={isDarkMode ? "#AAA" : "#888"} />
           </TouchableOpacity>
@@ -270,7 +270,6 @@ export default function HomeScreen({ route }) {
                       title={t('darkMode')} subtitle={t('darkModeDesc')} isSwitch={true} switchValue={isDarkMode} onSwitchChange={toggleDarkMode}
                    />
 
-                   {/* [NEW] Language Option Menu Card */}
                    <MeMenuCard 
                       icon="language" iconBg="rgba(233, 30, 99, 0.12)" iconColor="#E91E63" 
                       title={t('language')} subtitle={t('languageDesc')} onPress={() => setMeView('language')}
@@ -278,7 +277,6 @@ export default function HomeScreen({ route }) {
                 </ScrollView>
               </>
             ) : (
-              // [NEW] Language Selection Sub-screen
               <View style={{ flex: 1 }}>
                  <View style={styles.subScreenHeader}>
                     <TouchableOpacity style={{ padding: 10 }} onPress={() => setMeView('main')}>
@@ -375,7 +373,6 @@ const getDynamicStyles = (isDark) => StyleSheet.create({
   meMenuTitle: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: '600', marginBottom: 4 },
   meMenuSubtitle: { color: isDark ? '#888' : '#666', fontSize: 12 },
 
-  // [NEW] Language Sub-Screen Styles
   subScreenHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: isDark ? '#1a1a1a' : '#EAEAEA', marginBottom: 20 },
   subScreenTitle: { fontSize: 18, fontWeight: 'bold', color: isDark ? '#FFF' : '#000' },
   languageItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 18, paddingHorizontal: 20, backgroundColor: isDark ? '#15171a' : '#FFFFFF', borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: isDark ? '#1f2229' : '#EAEAEA' },
