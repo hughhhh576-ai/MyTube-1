@@ -12,10 +12,11 @@ export const ThemeProvider = ({ children }) => {
   const updateSystemNav = async (isDark) => {
     if (Platform.OS === 'android') {
       try {
-        // আপনার বটম ট্যাবের কালারের সাথে ম্যাচ করে ডার্ক মোডে #0a0a0a দেওয়া হয়েছে
         const bgColor = isDark ? '#0a0a0a' : '#ffffff';
         await NavigationBar.setBackgroundColorAsync(bgColor);
-        await NavigationBar.setButtonStyleAsync(isDark ? 'light' : 'dark');
+        
+        // বাটনগুলো সবসময় কালো রাখার জন্য 'dark' করে দেওয়া হলো
+        await NavigationBar.setButtonStyleAsync('dark'); 
       } catch (error) {
         console.log("Nav bar error:", error);
       }
