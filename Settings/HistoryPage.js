@@ -4,11 +4,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// Theme & Language
+import { useTheme } from '../ThemeContext';
+import { useLanguage } from '../LanguageContext';
+
 export default function HistoryPage() {
   const navigation = useNavigation();
   const isFocused = useIsFocused(); 
   const { isDarkMode } = useTheme();
   const { t } = useLanguage();
+  const styles = getDynamicStyles(isDarkMode);
   
   const [historyData, setHistoryData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -127,16 +132,18 @@ export default function HistoryPage() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F0F0F' },
-  header: { flexDirection: 'row', alignItems: 'center', height: 55, borderBottomWidth: 1, borderBottomColor: '#222' },
-  headerTitle: { flex: 1, color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 10 },
-  historyCard: { flexDirection: 'row', padding: 15, backgroundColor: '#1A1A1A', marginBottom: 10, borderRadius: 10, alignItems: 'center' },
-  infoContainer: { flex: 1, justifyContent: 'center' },
-  title: { color: '#FFF', fontSize: 15, fontWeight: 'bold', marginBottom: 6, lineHeight: 20 },
-  meta: { color: '#AAA', fontSize: 13, marginBottom: 4 },
-  linkText: { color: '#3EA6FF', fontSize: 12, fontStyle: 'italic' },
-  deleteBtn: { paddingLeft: 10 },
-  centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyText: { color: '#888', marginTop: 10, fontSize: 16 }
-});
+function getDynamicStyles(isDark) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: isDark ? '#0F0F0F' : '#F9F9F9' },
+    header: { flexDirection: 'row', alignItems: 'center', height: 55, borderBottomWidth: 1, borderBottomColor: isDark ? '#222' : '#EAEAEA' },
+    headerTitle: { flex: 1, color: isDark ? '#FFF' : '#000', fontSize: 18, fontWeight: 'bold', marginLeft: 10 },
+    historyCard: { flexDirection: 'row', padding: 15, backgroundColor: isDark ? '#1A1A1A' : '#FFF', marginBottom: 10, borderRadius: 10, alignItems: 'center' },
+    infoContainer: { flex: 1, justifyContent: 'center' },
+    title: { color: isDark ? '#FFF' : '#000', fontSize: 15, fontWeight: 'bold', marginBottom: 6, lineHeight: 20 },
+    meta: { color: isDark ? '#AAA' : '#666', fontSize: 13, marginBottom: 4 },
+    linkText: { color: '#3EA6FF', fontSize: 12, fontStyle: 'italic' },
+    deleteBtn: { paddingLeft: 10 },
+    centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    emptyText: { color: isDark ? '#888' : '#666', marginTop: 10, fontSize: 16 }
+  });
+}
