@@ -3,14 +3,12 @@ import React, { useEffect } from 'react';
 import { View, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import * as NavigationBar from 'expo-navigation-bar'; // [NEW] ইমপোর্ট করা হলো
+import * as NavigationBar from 'expo-navigation-bar';
 
 import { ThemeProvider, useTheme } from './ThemeContext'; 
 import { LanguageProvider } from './LanguageContext'; 
 
-// ==========================================
-// ১. Screens ফোল্ডার থেকে ফাইল ইমপোর্ট
-// ==========================================
+// Screens
 import HomeScreen from './Screens/HomeScreen';
 import ChannelScreen from './Screens/ChannelScreen';
 import PlayerScreen from './Screens/PlayerScreen';
@@ -19,9 +17,7 @@ import ShortsScreen from './Screens/ShortsScreen';
 import SubscriptionsScreen from './Screens/SubscriptionsScreen';
 import livescreen from './Screens/livescreen'; 
 
-// ==========================================
-// ২. Settings ফোল্ডার থেকে ফাইল ইমপোর্ট
-// ==========================================
+// Settings
 import SettingsScreen from './Settings/SettingsScreen';
 import HistoryPage from './Settings/HistoryPage';
 import downloadscreen from './Settings/downloadscreen'; 
@@ -33,12 +29,14 @@ const Stack = createStackNavigator();
 function MainApp() {
   const { isDarkMode } = useTheme();
 
-  // [ULTIMATE FIX]: React Navigation যেন কালার সাদা না করে দেয়, তাই এখানে আবার ফোর্স করা হলো
+  // React Navigation যেন কালার সাদা না করে দেয়
   useEffect(() => {
     if (Platform.OS === 'android') {
       const bgColor = isDarkMode ? '#0a0a0a' : '#ffffff';
       NavigationBar.setBackgroundColorAsync(bgColor).catch(() => {});
-      NavigationBar.setButtonStyleAsync(isDarkMode ? 'light' : 'dark').catch(() => {});
+      
+      // এখানেও বাটন কালো করার জন্য 'dark' দেওয়া হলো
+      NavigationBar.setButtonStyleAsync('dark').catch(() => {});
     }
   }, [isDarkMode]);
 
@@ -53,28 +51,21 @@ function MainApp() {
             headerShown: false
           }}
         >
-          {/* মূল স্ক্রিনসমূহ */}
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="Channel" component={ChannelScreen} />
           <Stack.Screen name="Player" component={PlayerScreen} />
           <Stack.Screen name="Playlist" component={PlaylistPage} />
           <Stack.Screen name="Shorts" component={ShortsScreen} />
 
-          {/* সেটিংস এবং হিস্টোরি */}
           <Stack.Screen name="Settings" component={SettingsScreen} />
           <Stack.Screen name="History" component={HistoryPage} />
           <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} />
-
-          {/* অন্যান্য স্ক্রিনগুলো */}
           <Stack.Screen name="searchsettings" component={SearchSetting} />
           <Stack.Screen name="Downloads" component={downloadscreen} />
           <Stack.Screen name="Live" component={livescreen} />
-
         </Stack.Navigator>
 
-        {/* গ্লোবাল প্লেয়ার */}
         <GlobalPlayer />
-
       </NavigationContainer>
     </View>
   );
