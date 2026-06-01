@@ -1,20 +1,21 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as NavigationBar from 'expo-navigation-bar'; // [NEW] সিস্টেম বার কন্ট্রোলার
+import * as NavigationBar from 'expo-navigation-bar';
 
 export const ThemeContext = createContext();
 
 export const ThemeProvider = ({ children }) => {
   const [isDarkMode, setIsDarkMode] = useState(true);
 
-  // সিস্টেম নেভিগেশন বারের কালার আপডেট করার ফাংশন
+  // সিস্টেম নেভিগেশন বারের কালার আপডেট করার স্ট্যান্ডার্ড ফাংশন
   const updateSystemNav = async (isDark) => {
     if (Platform.OS === 'android') {
       try {
-        // ডার্ক মোডে বটম ট্যাবের কালারের (#0a0a0a) সাথে ম্যাচ করানো হয়েছে
-        await NavigationBar.setBackgroundColorAsync(isDark ? '#0a0a0a' : '#FFFFFF');
-        // ডার্ক মোডে বাটনগুলো সাদা (light) এবং লাইট মোডে কালো (dark) হবে
+        // ডার্ক মোডে কালো (#0a0a0a) এবং লাইট মোডে সাদা (#FFFFFF)
+        const bgColor = isDark ? '#0a0a0a' : '#FFFFFF';
+        
+        await NavigationBar.setBackgroundColorAsync(bgColor);
         await NavigationBar.setButtonStyleAsync(isDark ? 'light' : 'dark');
       } catch (error) {
         console.log("Nav bar error:", error);
@@ -29,9 +30,9 @@ export const ThemeProvider = ({ children }) => {
         if (savedTheme !== null) {
           const isDark = savedTheme === 'dark';
           setIsDarkMode(isDark);
-          updateSystemNav(isDark); // অ্যাপ চালুর সময় কালার সেট হবে
+          updateSystemNav(isDark);
         } else {
-          updateSystemNav(true); // ডিফল্ট ডার্ক
+          updateSystemNav(true);
         }
       } catch (e) {}
     };
@@ -42,7 +43,7 @@ export const ThemeProvider = ({ children }) => {
     const newTheme = !isDarkMode;
     setIsDarkMode(newTheme);
     await AsyncStorage.setItem('appTheme', newTheme ? 'dark' : 'light');
-    updateSystemNav(newTheme); // সুইচ চাপার সাথে সাথে কালার পাল্টাবে
+    updateSystemNav(newTheme);
   };
 
   return (
