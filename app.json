@@ -4,13 +4,13 @@
     "slug": "bio-digital-truth",
     "version": "1.0.0",
     "orientation": "default",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/iconm.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": false,
     "jsEngine": "hermes",
     "scheme": "biodigital",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/splashm.png",
       "resizeMode": "contain",
       "backgroundColor": "#0F0F0F"
     },
@@ -33,7 +33,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/adaptive-iconm.png",
         "backgroundColor": "#0F0F0F"
       },
       "package": "com.imtiaz.biodigitaltruth",
@@ -119,4 +119,5 @@
     },
     "owner": "omarali_2030"
   }
-        }com.mytube.app34
+}
+
