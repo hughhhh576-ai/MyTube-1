@@ -125,10 +125,7 @@
       ],
     ],
     "extra": {
-      "expo-navigation-bar": {},
-      "eas": {
-        "projectId": "845fb4c1-365b-40da-8c66-5d6cc2af8c18"
-      }
+      "expo-navigation-bar": {}
     },
     "owner": "omarali_2030"
   }
