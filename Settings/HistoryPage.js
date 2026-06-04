@@ -146,4 +146,4 @@ function getDynamicStyles(isDark) {
     centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     emptyText: { color: isDark ? '#888' : '#666', marginTop: 10, fontSize: 16 }
   });
-}
+}ক
