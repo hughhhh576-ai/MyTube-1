@@ -6,6 +6,10 @@ import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native'
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native'; 
 
+// Theme & Language
+import { useTheme } from '../ThemeContext';
+import { useLanguage } from '../LanguageContext'; 
+
 const { width } = Dimensions.get('window');
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -13,6 +17,9 @@ export default function ChannelScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const isFocused = useIsFocused();
+  const { isDarkMode } = useTheme();
+  const { t } = useLanguage();
+  const styles = getDynamicStyles(isDarkMode);
 
   const { channelData = {}, channelName: paramChannelName, channelAvatar: paramAvatar, channelUrl: paramChannelUrl } = route.params || {};
 
@@ -580,13 +587,13 @@ export default function ChannelScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" />
+    <SafeAreaView style={[styles.container, { backgroundColor: isDarkMode ? '#0F0F0F' : '#F9F9F9' }]}>
+      <StatusBar backgroundColor={isDarkMode ? '#0F0F0F' : '#FFFFFF'} barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIcon}>
-           <Ionicons name="arrow-back" size={24} color="#FFF" />
+           <Ionicons name="arrow-back" size={24} color={isDarkMode ? '#FFF' : '#000'} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{channelName}</Text>
+        <Text style={[styles.headerTitle, { color: isDarkMode ? '#FFF' : '#000' }]} numberOfLines={1}>{channelName}</Text>
       </View>
 
       <FlatList 
@@ -608,64 +615,66 @@ export default function ChannelScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F0F0F' },
-  header: { flexDirection: 'row', alignItems: 'center', height: 50, paddingHorizontal: 10 },
-  headerIcon: { padding: 10 },
-  headerTitle: { flex: 1, color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 5 },
+function getDynamicStyles(isDark) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: isDark ? '#0F0F0F' : '#F9F9F9' },
+    header: { flexDirection: 'row', alignItems: 'center', height: 50, paddingHorizontal: 10 },
+    headerIcon: { padding: 10 },
+    headerTitle: { flex: 1, color: isDark ? '#FFF' : '#000', fontSize: 18, fontWeight: 'bold', marginLeft: 5 },
 
-  bannerContainer: { width: width, height: width * 0.25, backgroundColor: '#222', position: 'relative' },
-  bannerImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+    bannerContainer: { width: width, height: width * 0.25, backgroundColor: isDark ? '#222' : '#eee', position: 'relative' },
+    bannerImage: { width: '100%', height: '100%', resizeMode: 'cover' },
 
-  channelProfileSection: { flexDirection: 'row', padding: 15, alignItems: 'center' },
-  avatarWrapper: { marginRight: 15 },
-  channelLogoLarge: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#333' },
-  channelTextInfo: { flex: 1 },
-  channelTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFF' },
-  channelMeta: { fontSize: 12, color: '#AAA', marginTop: 2, marginBottom: 8 },
-  actionButtonsContainer: { flexDirection: 'row', paddingHorizontal: 15, paddingBottom: 15 },
-  subscribeBtn: { flex: 1, flexDirection: 'row', paddingVertical: 10, borderRadius: 20, justifyContent: 'center', alignItems: 'center', gap: 5 },
-  subscribedState: { backgroundColor: '#272727' },
-  unsubscribedState: { backgroundColor: '#F1F1F1' },
-  subscribeText: { fontSize: 14, fontWeight: 'bold' },
-  tabScrollContainer: { borderBottomWidth: 1, borderBottomColor: '#222' },
-  tabButton: { paddingVertical: 15, paddingHorizontal: 20 },
-  activeTabButton: { borderBottomWidth: 2, borderBottomColor: '#FFF' },
-  tabText: { color: '#AAA', fontSize: 15, fontWeight: '500' },
-  activeTabText: { color: '#FFF', fontWeight: 'bold' },
+    channelProfileSection: { flexDirection: 'row', padding: 15, alignItems: 'center' },
+    avatarWrapper: { marginRight: 15 },
+    channelLogoLarge: { width: 70, height: 70, borderRadius: 35, backgroundColor: isDark ? '#333' : '#ccc' },
+    channelTextInfo: { flex: 1 },
+    channelTitle: { fontSize: 20, fontWeight: 'bold', color: isDark ? '#FFF' : '#000' },
+    channelMeta: { fontSize: 12, color: isDark ? '#AAA' : '#666', marginTop: 2, marginBottom: 8 },
+    actionButtonsContainer: { flexDirection: 'row', paddingHorizontal: 15, paddingBottom: 15 },
+    subscribeBtn: { flex: 1, flexDirection: 'row', paddingVertical: 10, borderRadius: 20, justifyContent: 'center', alignItems: 'center', gap: 5 },
+    subscribedState: { backgroundColor: isDark ? '#272727' : '#272727' },
+    unsubscribedState: { backgroundColor: isDark ? '#272727' : '#F1F1F1' },
+    subscribeText: { fontSize: 14, fontWeight: 'bold' },
+    tabScrollContainer: { borderBottomWidth: 1, borderBottomColor: isDark ? '#222' : '#e6e6e6' },
+    tabButton: { paddingVertical: 15, paddingHorizontal: 20 },
+    activeTabButton: { borderBottomWidth: 2, borderBottomColor: isDark ? '#FFF' : '#000' },
+    tabText: { color: isDark ? '#AAA' : '#666', fontSize: 15, fontWeight: '500' },
+    activeTabText: { color: isDark ? '#FFF' : '#000', fontWeight: 'bold' },
 
-  vidmateCard: { flexDirection: 'row', padding: 12, borderBottomWidth: 1, borderBottomColor: '#1A1A1A', backgroundColor: '#0F0F0F' },
-  thumbnailWrapper: { width: 150, height: 85, borderRadius: 8, overflow: 'hidden', backgroundColor: '#222', position: 'relative' },
-  vidmateThumbnail: { width: '100%', height: '100%', resizeMode: 'cover' },
-  durationBadge: { position: 'absolute', bottom: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.8)', color: '#FFF', fontSize: 11, paddingHorizontal: 4, paddingVertical: 2, borderRadius: 4, fontWeight: 'bold' },
-  infoWrapper: { flex: 1, marginLeft: 12, justifyContent: 'center' },
-  vidmateTitle: { color: '#FFF', fontSize: 14, fontWeight: 'bold', marginBottom: 6, lineHeight: 20 },
-  vidmateMeta: { color: '#AAA', fontSize: 12, marginBottom: 0 }, 
+    vidmateCard: { flexDirection: 'row', padding: 12, borderBottomWidth: 1, borderBottomColor: isDark ? '#1A1A1A' : '#e6e6e6', backgroundColor: isDark ? '#0F0F0F' : '#FFFFFF' },
+    thumbnailWrapper: { width: 150, height: 85, borderRadius: 8, overflow: 'hidden', backgroundColor: isDark ? '#222' : '#ddd', position: 'relative' },
+    vidmateThumbnail: { width: '100%', height: '100%', resizeMode: 'cover' },
+    durationBadge: { position: 'absolute', bottom: 5, right: 5, backgroundColor: isDark ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.06)', color: isDark ? '#FFF' : '#000', fontSize: 11, paddingHorizontal: 4, paddingVertical: 2, borderRadius: 4, fontWeight: 'bold' },
+    infoWrapper: { flex: 1, marginLeft: 12, justifyContent: 'center' },
+    vidmateTitle: { color: isDark ? '#FFF' : '#000', fontSize: 14, fontWeight: 'bold', marginBottom: 6, lineHeight: 20 },
+    vidmateMeta: { color: isDark ? '#AAA' : '#666', fontSize: 12, marginBottom: 0 }, 
 
-  shortsColumnWrapper: { 
-    justifyContent: 'flex-start', 
-    paddingHorizontal: 2,
-    marginTop: 10 
-  },
-  shortCard: { 
-    width: (width / 3) - 4, 
-    marginHorizontal: 2, 
-    marginBottom: 4, 
-    backgroundColor: '#0F0F0F' 
-  },
-  shortThumbnailWrapper: {
-    width: '100%',
-    height: ((width / 3) - 4) * 1.77, 
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: '#222'
-  },
-  shortThumbnail: { 
-    width: '100%', 
-    height: '100%', 
-    resizeMode: 'cover' 
-  },
+    shortsColumnWrapper: { 
+      justifyContent: 'flex-start', 
+      paddingHorizontal: 2,
+      marginTop: 10 
+    },
+    shortCard: { 
+      width: (width / 3) - 4, 
+      marginHorizontal: 2, 
+      marginBottom: 4, 
+      backgroundColor: isDark ? '#0F0F0F' : '#FFFFFF' 
+    },
+    shortThumbnailWrapper: {
+      width: '100%',
+      height: ((width / 3) - 4) * 1.77, 
+      borderRadius: 8,
+      overflow: 'hidden',
+      backgroundColor: isDark ? '#222' : '#ddd'
+    },
+    shortThumbnail: { 
+      width: '100%', 
+      height: '100%', 
+      resizeMode: 'cover' 
+    },
 
-  emptyStateContainer: { padding: 40, alignItems: 'center', justifyContent: 'center' },
-  emptyStateText: { color: '#AAA', fontSize: 16, fontWeight: '500' }
-});
+    emptyStateContainer: { padding: 40, alignItems: 'center', justifyContent: 'center' },
+    emptyStateText: { color: isDark ? '#AAA' : '#666', fontSize: 16, fontWeight: '500' }
+  });
+}
