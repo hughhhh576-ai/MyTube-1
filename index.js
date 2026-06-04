@@ -1,15 +1,15 @@
-import 'react-native-reanimated';
-import React from 'react';
-import { View, Text, ScrollView } from 'react-native';
-import { registerRootComponent } from 'expo';
-import App from './App';
-
 // MessageQueue বাইপাস করার জন্য Polyfill (Expo Go ক্র্যাশ ফিক্স)
 if (!global.MessageQueue) {
   global.MessageQueue = {
     spy: () => {},
   };
 }
+
+import 'react-native-reanimated';
+import React from 'react';
+import { View, Text, ScrollView } from 'react-native';
+import { registerRootComponent } from 'expo';
+import App from './App';
 
 // ১. রিয়্যাক্ট এরর বাউন্ডারি (স্ক্রিনে পুরো এরর দেখানোর জন্য)
 class ErrorBoundary extends React.Component {
