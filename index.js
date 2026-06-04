@@ -1,10 +1,17 @@
 // MessageQueue বাইপাস করার জন্য Polyfill (Expo Go ক্র্যাশ ফিক্স)
+// MessageQueue বাইপাস করার জন্য Polyfill (Expo Go ক্র্যাশ ফিক্স)
+// React Native এর অভ্যন্তরীণ উপাদান দ্বারা অ্যাক্সেস করা কিছু মূল বৈশিষ্ট্য যোগ করা হয়েছে।
+// এটি Hermes এবং expo-dev-client পরিবেশে আরও স্থিতিশীলতা দিতে সাহায্য করতে পারে।
 if (!global.MessageQueue) {
   global.MessageQueue = {
+    // সাধারণত কনসোল স্পাইংয়ের জন্য ব্যবহৃত হয়
     spy: () => {},
-    // Adding _touchableRegions, which is sometimes accessed early by React Native runtime
-    // especially with Hermes enabled, to prevent "Property 'MessageQueue' doesn't exist" errors.
-    _touchableRegions: [], 
+    // টাচেবল উপাদানগুলির জন্য ব্যবহৃত হয়
+    _touchableRegions: [],
+    // নেটিভ মডিউলগুলিতে কল পাঠানোর জন্য ব্যবহৃত হয়
+    enqueueNativeCall: () => {},
+    // রিমোট মডিউলগুলির একটি টেবিল যা মাঝে মাঝে প্রত্যাশিত হয়
+    _remoteModuleTable: {}, 
   };
 }
 
