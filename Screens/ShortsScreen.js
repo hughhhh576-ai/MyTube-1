@@ -5,6 +5,10 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useIsFocused, useFocusEffect } from '@react-navigation/native';
 
+// Theme & Language
+import { useTheme } from '../ThemeContext';
+import { useLanguage } from '../LanguageContext';
+
 const UAS = {
   anti: "Mozilla/5.0 (Linux; Android 11; LS5018 Build/RP1A.201005.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/106.0.5249.126 Mobile Safari/537.36",
   low: "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.181 Mobile Safari/537.36",
@@ -15,6 +19,8 @@ const UAS = {
 export default function ShortsScreen({ initialVideoId, route }) {
   const navigation = useNavigation();
   const isFocused = useIsFocused();
+  const { isDarkMode } = useTheme();
+  const { t } = useLanguage();
 
   const [isActive, setIsActive] = useState(true);
   const [isAutoSkipping, setIsAutoSkipping] = useState(false);
@@ -31,6 +37,9 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
   const [currentUrl, setCurrentUrl] = useState(`https://m.youtube.com/shorts/${initialVideoId || route?.params?.videoId || ''}`);
   const [currentChannel, setCurrentChannel] = useState({ name: 'Unknown Channel', isSubscribed: false });
+
+  // dynamic styles
+  const styles = getDynamicStyles(isDarkMode);
 
   const subscribeTimerRef = useRef(null);
   const currentChannelNameRef = useRef(''); 
@@ -125,9 +134,9 @@ export default function ShortsScreen({ initialVideoId, route }) {
       if (isSubbed) parsedSubs = parsedSubs.filter(s => s.name !== channelNameToSave);
       else parsedSubs.push({ id: Date.now().toString(), name: channelNameToSave, avatar: 'https://via.placeholder.com/150' });
 
-      await AsyncStorage.setItem('subscribedChannels', JSON.stringify(parsedSubs));
+      try { await AsyncStorage.setItem('subscribedChannels', JSON.stringify(parsedSubs)); } catch (e) { console.log('AsyncStorage set subscribedChannels error', e); }
       setCurrentChannel(prev => ({ ...prev, isSubscribed: !isSubbed }));
-    } catch (e) {}
+    } catch (e) { console.log('AsyncStorage get subscribedChannels error', e); }
   };
 
   const handleShare = async () => {
@@ -258,16 +267,16 @@ export default function ShortsScreen({ initialVideoId, route }) {
       style={styles.container}
       onTouchStart={() => setShowMuteIcon(false)} // নেটিভ ভিউ এর উপর টাচ করলেও যেন আইকন গায়েব হয়
     >
-      <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" />
+      <StatusBar backgroundColor={isDarkMode ? '#0F0F0F' : '#FFFFFF'} barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
 
       <View style={styles.header}>
         <View style={styles.logoContainer}>
            <Ionicons name="logo-youtube" size={28} color="#FF0000" />
-           <Text style={styles.logoText}>MyTube</Text>
+           <Text style={styles.logoText}>{__translate('MyTube')}</Text>
         </View>
         <TouchableOpacity style={styles.searchBar} activeOpacity={0.8} onPress={() => navigation.navigate('searchsettings')}>
-          <Text style={{ flex: 1, color: '#888', fontSize: 14 }}>সার্চ...</Text>
-          <Ionicons name="search" size={18} color="#AAA" />
+          <Text style={{ flex: 1, color: isDarkMode ? '#888' : '#666', fontSize: 14 }}>{t('search') || 'সার্চ...'}</Text>
+          <Ionicons name="search" size={18} color={isDarkMode ? '#AAA' : '#555'} />
         </TouchableOpacity>
       </View>
 
@@ -288,7 +297,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
       {showMuteIcon && (
         <View style={styles.muteIconContainer} pointerEvents="none">
-          <Ionicons name="volume-mute" size={24} color="#FFF" />
+          <Ionicons name="volume-mute" size={24} color={isDarkMode ? '#FFF' : '#111'} />
         </View>
       )}
 
@@ -304,8 +313,8 @@ export default function ShortsScreen({ initialVideoId, route }) {
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.nativeShareBtn} onPress={handleShare} activeOpacity={0.8}>
-              <Ionicons name="arrow-redo-outline" size={18} color="#FFF" />
-              <Text style={styles.nativeShareText}>Share</Text>
+              <Ionicons name="arrow-redo-outline" size={18} color={isDarkMode ? '#FFF' : '#111'} />
+              <Text style={styles.nativeShareText}>{__translate('Share')}</Text>
             </TouchableOpacity>
         </View>
       )}
@@ -313,7 +322,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
       {isAutoSkipping && (
         <View style={styles.skipOverlay}>
           <ActivityIndicator size="large" color="#FF0000" />
-          <Text style={styles.skipText}>অ্যাড ফিল্টার হচ্ছে...</Text>
+          <Text style={styles.skipText}>{__translate('অ্যাড ফিল্টার হচ্ছে...')}</Text>
         </View>
       )}
 
@@ -327,42 +336,44 @@ export default function ShortsScreen({ initialVideoId, route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#000', 
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 
-  },
-  header: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    paddingHorizontal: 12, 
-    height: 52, 
-    borderBottomWidth: 1, 
-    borderBottomColor: '#222', 
-    width: '100%', 
-    backgroundColor: '#0F0F0F' 
-  },
-  logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
-  logoText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
-  searchBar: { flex: 1, flexDirection: 'row', backgroundColor: '#222', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
-  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
-  skipOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
-  skipText: { color: '#FFF', marginTop: 15, fontWeight: 'bold' },
-  actionRowContainer: { position: 'absolute', bottom: "20%", left: 15, flexDirection: 'row', alignItems: 'center', zIndex: 99999, elevation: 100 },
-  nativeSubBtn: { backgroundColor: '#FF0000', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  nativeSubbedBtn: { backgroundColor: '#333', borderColor: '#555' },
-  nativeSubText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
-  nativeSubbedText: { color: '#AAA' },
-  nativeShareBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 25, marginLeft: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  nativeShareText: { color: '#FFF', fontWeight: 'bold', fontSize: 13, marginLeft: 6 },
-  muteIconContainer: {
-    position: 'absolute',
-    top: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 65 : 100, // হেডারের ঠিক নিচে ডান সাইডে
-    right: 15,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    padding: 8,
-    borderRadius: 20,
-    zIndex: 99999,
-  }
-});
+function getDynamicStyles(isDark) {
+  return StyleSheet.create({
+    container: { 
+      flex: 1, 
+      backgroundColor: isDark ? '#000' : '#F9F9F9', 
+      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 
+    },
+    header: { 
+      flexDirection: 'row', 
+      alignItems: 'center', 
+      paddingHorizontal: 12, 
+      height: 52, 
+      borderBottomWidth: 1, 
+      borderBottomColor: isDark ? '#222' : '#EAEAEA', 
+      width: '100%', 
+      backgroundColor: isDark ? '#0F0F0F' : '#FFFFFF' 
+    },
+    logoContainer: { flexDirection: 'row', alignItems: 'center', width: 105 },
+    logoText: { color: isDark ? '#FFF' : '#000', fontSize: 16, fontWeight: 'bold', marginLeft: 4 },
+    searchBar: { flex: 1, flexDirection: 'row', backgroundColor: isDark ? '#222' : '#F0F0F0', borderRadius: 20, marginHorizontal: 8, paddingHorizontal: 12, alignItems: 'center', height: 38 },
+    loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: isDark ? '#000' : 'rgba(255,255,255,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
+    skipOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: isDark ? 'rgba(0,0,0,0.9)' : 'rgba(255,255,255,0.95)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
+    skipText: { color: isDark ? '#FFF' : '#000', marginTop: 15, fontWeight: 'bold' },
+    actionRowContainer: { position: 'absolute', bottom: "20%", left: 15, flexDirection: 'row', alignItems: 'center', zIndex: 99999, elevation: 100 },
+    nativeSubBtn: { backgroundColor: '#FF0000', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.06)' },
+    nativeSubbedBtn: { backgroundColor: isDark ? '#333' : '#EEE', borderColor: isDark ? '#555' : '#DDD' },
+    nativeSubText: { color: isDark ? '#FFF' : '#000', fontWeight: 'bold', fontSize: 13 },
+    nativeSubbedText: { color: isDark ? '#AAA' : '#666' },
+    nativeShareBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(0,0,0,0.05)', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 25, marginLeft: 10, borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.06)' },
+    nativeShareText: { color: isDark ? '#FFF' : '#000', fontWeight: 'bold', fontSize: 13, marginLeft: 6 },
+    muteIconContainer: {
+      position: 'absolute',
+      top: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 65 : 100, // হেডারের ঠিক নিচে ডান সাইডে
+      right: 15,
+      backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)',
+      padding: 8,
+      borderRadius: 20,
+      zIndex: 99999,
+    }
+  });
+}
