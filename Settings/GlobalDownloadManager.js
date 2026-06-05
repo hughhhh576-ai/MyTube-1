@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView, StatusBar, Alert, Animated, PanResponder, Dimensions, Modal, DeviceEventEmitter } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useNavigationState } from '@react-navigation/native';
 
 // Theme & Language
 import { useTheme } from '../ThemeContext';
@@ -38,7 +38,7 @@ export default function GlobalDownloadManager() {
     // State Management
     // =====================================
     const [downloads, setDownloads] = useState([]);
-    const [isScreenVisible, setIsScreenVisible] = useState(false); // Modal State
+    const [isScreenVisible, setIsScreenVisible] = useState(false); 
     
     // Badge States
     const [activeCount, setActiveCount] = useState(0);
@@ -64,7 +64,6 @@ export default function GlobalDownloadManager() {
     useEffect(() => {
         loadDownloads();
 
-        // 🎯 অ্যাপের যেকোনো জায়গা থেকে ডাউনলোড স্ক্রিন ওপেন করার জন্য ইভেন্ট লিসেনার
         const openEvent = DeviceEventEmitter.addListener('openDownloadScreen', () => {
             setIsScreenVisible(true);
             loadDownloads();
@@ -73,7 +72,6 @@ export default function GlobalDownloadManager() {
         return () => openEvent.remove();
     }, []);
 
-    // 🎯 একক ইন্টারভ্যাল: ভাসমান আইকন এবং লিস্ট উভয়কেই লাইভ আপডেট করবে
     useEffect(() => {
         const interval = setInterval(async () => {
             try {
@@ -84,7 +82,6 @@ export default function GlobalDownloadManager() {
                 const count = Object.keys(active).filter(k => active[k].status !== 'error' && active[k].status !== 'completed').length;
                 setActiveCount(count);
 
-                // আইকন ভাসানোর লজিক (স্ক্রিন ওপেন থাকলে ভাসবে না)
                 if (!isScreenVisible) {
                     if (count > dismissedCountRef.current) {
                         setIsBadgeVisible(true);
@@ -96,7 +93,6 @@ export default function GlobalDownloadManager() {
                     }
                 }
 
-                // লিস্ট আপডেট লজিক
                 setDownloads(prevDownloads => {
                     let needsSave = false;
                     let updatedList = [...prevDownloads];
@@ -189,7 +185,7 @@ export default function GlobalDownloadManager() {
 
     const handlePlayVideo = (item) => {
         if (!item.isCompleted) return;
-        setIsScreenVisible(false); // প্লেয়ারে যাওয়ার আগে লিস্ট স্ক্রিন বন্ধ করতে হবে
+        setIsScreenVisible(false); 
         navigation.navigate('Player', {
             videoId: item.videoId,
             videoData: { id: item.videoId, title: item.title, channel: 'Downloaded File', thumbnail: item.thumbnail, localUri: item.localUri, type: item.type }
@@ -204,7 +200,6 @@ export default function GlobalDownloadManager() {
     // =====================================
     return (
         <>
-            {/* 🎯 ভাসমান আইকন */}
             {isBadgeVisible && !isScreenVisible && activeCount > 0 && (
                 <Animated.View {...panResponder.panHandlers} style={[styles.badgeContainer, { transform: pan.getTranslateTransform() }]}>
                     <TouchableOpacity activeOpacity={0.8} onPress={() => { setIsBadgeVisible(false); setIsScreenVisible(true); }} style={styles.badge}>
@@ -214,7 +209,6 @@ export default function GlobalDownloadManager() {
                 </Animated.View>
             )}
 
-            {/* 🎯 গ্লোবাল ডাউনলোড স্ক্রিন (Modal) */}
             <Modal visible={isScreenVisible} animationType="slide" onRequestClose={() => setIsScreenVisible(false)}>
                 <SafeAreaView style={[styles.container, { backgroundColor: isDarkMode ? '#0F0F0F' : '#F9F9F9' }]}>
                     <StatusBar backgroundColor={isDarkMode ? '#0F0F0F' : '#FFFFFF'} barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
@@ -280,7 +274,8 @@ export default function GlobalDownloadManager() {
                             activeDownloads.length === 0 && completedDownloads.length === 0 && (
                                 <View style={styles.empty}>
                                     <Ionicons name="download-outline" size={80} color="#333" />
-                                    <Text style={styles.emptyText}>{__translate('কোনো ডাউনলোড পাওয়া যায়নি')}</Text>
+                                    {/* 🎯 এখানে __translate পরিবর্তন করে t দেওয়া হয়েছে */}
+                                    <Text style={styles.emptyText}>{t('কোনো ডাউনলোড পাওয়া যায়নি')}</Text>
                                 </View>
                             )
                         }
