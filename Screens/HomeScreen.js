@@ -204,7 +204,8 @@ export default function HomeScreen({ route }) {
         <View style={styles.header}>
           <View style={styles.logoContainer}>
              <Ionicons name="logo-youtube" size={28} color="#FF0000" />
-             <Text style={styles.logoText}>{__translate('MyTube')}</Text>
+             {/* 🎯 এখানে __translate পরিবর্তন করে t দেওয়া হয়েছে */}
+             <Text style={styles.logoText}>{t('MyTube')}</Text>
           </View>
           <TouchableOpacity style={styles.searchBar} activeOpacity={0.8} onPress={() => navigation.navigate('searchsettings')}>
             <Text style={{ flex: 1, color: isDarkMode ? '#888' : '#666', fontSize: 14 }}>{searchQuery || t('search')}</Text>
@@ -250,7 +251,7 @@ export default function HomeScreen({ route }) {
                    />
                    <MeMenuCard 
                       icon="download" iconBg="rgba(76, 175, 80, 0.12)" iconColor="#4CAF50" 
-                      title={t('download')} subtitle={t('downloadDesc')} onPress={() => navigation.navigate('GlobalDownloadManager')} 
+                      title={t('download')} subtitle={t('downloadDesc')} onPress={() => navigation.navigate('Downloads')} 
                    />
                    <MeMenuCard 
                       icon="logo-youtube" iconBg="rgba(244, 67, 54, 0.12)" iconColor="#F44336" 
