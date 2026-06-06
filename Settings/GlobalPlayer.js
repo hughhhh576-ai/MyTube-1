@@ -16,7 +16,7 @@ import { BlurView } from 'expo-blur';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
-import { Buffer } from 'buffer';
+import { decode } from 'base64-arraybuffer'; // 👈 নতুন ফাস্ট বাফার ডিকোডার
 import * as jpeg from 'jpeg-js';
 import FaceDetection, { FaceDetectorContourMode, FaceDetectorLandmarkMode } from '@react-native-ml-kit/face-detection';
 import { loadTensorflowModel } from 'react-native-fast-tflite';
@@ -484,8 +484,10 @@ export default function GlobalPlayer() {
               encoding: FileSystem.EncodingType.Base64 
           });
 
-          // ৩. Base64 থেকে র-বাফার ও জেপেগ ডিকোড করা
-          const rawBuffer = Buffer.from(base64Data, 'base64');
+          // ৩. Base64 থেকে সরাসরি Uint8Array তে রূপান্তর (নতুন base64-arraybuffer পদ্ধতি)
+          const rawBuffer = new Uint8Array(decode(base64Data));
+          
+          // জেপেগ ডিকোড করা
           const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
 
           // ৪. RGBA পিক্সেল ম্যাট্রিক্স থেকে RGB এ রূপান্তর ও ০.০ - ১.০ এর মাঝে নরমালাইজ করা
@@ -503,7 +505,7 @@ export default function GlobalPlayer() {
           if (output && output[0] && output[0].length > 0) {
               const probability = output[0][0]; 
               console.log(`Female Probability: ${probability}`);
-              return probability > 0.5; // ০.৫ এর বেশি হলে Female (True), কম হলে Male (False)
+              return probability > 0.5; // ০.৫ এর বেশি হলে Female (True)
           }
           return false;
       } catch (error) {
