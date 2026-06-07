@@ -128,11 +128,12 @@ export default function GlobalPlayer() {
   const isSyncingRef = useRef(false);
   const pendingSeekRef = useRef(null); 
 
-  // 🚨 [REAL AI STATES AND REFS]
+  // 🚨 [REAL AI STATES AND REFS - NEW ARCHITECTURE]
   const [isBlurred, setIsBlurred] = useState(false);
-  const lastAiCheckTimeRef = useRef(0);
   const isAiProcessingRef = useRef(false);
   const genderModelRef = useRef(null);
+  // এই ম্যাপটিতে এআই তার তৈরি করা টাইমলাইন ডেটা জমিয়ে রাখবে। যেমন: { 2: false, 4: true, 6: false }
+  const blurTimelineMapRef = useRef({}); 
 
   useEffect(() => {
     const setupAudio = async () => {
@@ -285,8 +286,10 @@ export default function GlobalPlayer() {
       cachedAudioUrlRef.current = null;
       pendingSeekRef.current = null;
       
+      // 🚨 নতুন ভিডিও শুরু হলে ব্লার এবং টাইমলাইন ডেটা মুছে রিসেট করা হবে
       setIsBlurred(false); 
-      lastAiCheckTimeRef.current = 0;
+      blurTimelineMapRef.current = {}; 
+      isAiProcessingRef.current = false;
 
       setCurrentTime(0);
       setBuffered(0);
@@ -473,7 +476,7 @@ export default function GlobalPlayer() {
               const cleanPath = modelUri.replace('file://', '');
 
               genderModelRef.current = await loadTensorflowModel(cleanPath);
-              console.log("AI Model Loaded Perfectly from Memory: ", cleanPath);
+              console.log("✅ Model Loaded Perfectly from Memory: ", cleanPath);
 
           } catch (e) {
               console.log("Model Loading Failure:", e);
@@ -481,10 +484,8 @@ export default function GlobalPlayer() {
       }
   };
 
-  // 🚨 [FIXED] ডিফল্ট (পাওয়ারফুল) মোডে কল করা হচ্ছে
   const detectFacesWithMLKit = async (uri) => {
       try {
-          // কোনো কাস্টম অপশন না দিয়ে ডিফল্ট মোডে কল করলে এটি সবচেয়ে ভালো স্ক্যান করে
           const faces = await FaceDetection.detect(uri);
           return faces;
       } catch (error) {
@@ -522,32 +523,35 @@ export default function GlobalPlayer() {
           const output = await genderModelRef.current.run([rgbPixels]);
           
           if (output && output[0] && output[0].length > 0) {
-              const probability = output[0][0]; 
-              console.log(`Female Probability: ${probability}`);
-              return probability > 0.5; 
+              return output[0][0] > 0.5; 
           }
           return false;
       } catch (error) {
-          console.log("TFLite Pipeline Error: ", error);
           return false;
       }
   };
 
-  const runSafeViewingAI = async (timeInSeconds, vUrl) => {
+  // 🚨 [NEW] প্রি-কম্পিউটিং (Lookahead) ফাংশন: এটি শুধু নির্দিষ্ট সেকেন্ড চেক করে ম্যাপে সেভ করবে
+  const preComputeBlurForTime = async (targetTimeInSeconds, vUrl) => {
+      if (blurTimelineMapRef.current[targetTimeInSeconds] !== undefined) return; 
+      
       isAiProcessingRef.current = true;
-      console.log(`\n--- 🤖 AI CHECK AT ${timeInSeconds.toFixed(1)}s ---`);
+      console.log(`\n⏳ [Lookahead] Pre-computing for sec: ${targetTimeInSeconds}`);
       
       try {
-          // 🚨 [FIXED] ছবির কোয়ালিটি 0.3 থেকে বাড়িয়ে 0.8 (HD) করে দেওয়া হলো
-          const { uri } = await VideoThumbnails.getThumbnailAsync(vUrl, {
-              time: Math.floor(timeInSeconds * 1000), 
+          const thumbnailPromise = VideoThumbnails.getThumbnailAsync(vUrl, {
+              time: Math.floor(targetTimeInSeconds * 1000), 
               quality: 0.8, 
           });
-          console.log("📸 Thumbnail Captured: Success");
 
+          const timeoutPromise = new Promise((_, reject) => {
+              setTimeout(() => reject(new Error("Timeout")), 1500);
+          });
+
+          const { uri } = await Promise.race([thumbnailPromise, timeoutPromise]);
           const faces = await detectFacesWithMLKit(uri);
-          console.log(`👤 Faces Detected: ${faces.length}`);
 
+          let finalDecision = false;
           if (faces && faces.length > 0) {
               const face = faces[0];
               const box = face.frame || face.bounds || {}; 
@@ -563,27 +567,52 @@ export default function GlobalPlayer() {
                       [{ crop: { originX, originY, width, height } }],
                       { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
                   );
-                  console.log("✂️ Face Cropped: Success");
 
-                  const isFemale = await checkGenderWithTFLite(croppedFace.uri);
-                  console.log(`🛑 Final Decision: Blur = ${isFemale}`);
-                  
-                  setIsBlurred(isFemale); 
-              } else {
-                  console.log("⚠️ Face Box Invalid (Width/Height 0)");
-                  setIsBlurred(false);
+                  finalDecision = await checkGenderWithTFLite(croppedFace.uri);
               }
-          } else {
-              setIsBlurred(false); 
           }
+          
+          // ম্যাপে রেজাল্ট সেভ করে রাখা হলো
+          blurTimelineMapRef.current[targetTimeInSeconds] = finalDecision;
+          console.log(`✅ [Lookahead] Saved: Sec ${targetTimeInSeconds} -> Blur: ${finalDecision}`);
+
       } catch (error) {
-          console.log("❌ AI Pipeline Error: ", error.message || error);
-          setIsBlurred(false);
+          // টাইমআউট বা এরর হলে সেভ করে রাখবে false হিসেবে, যাতে প্লেয়ার আর কখনো এটিকে প্রসেস করতে না বলে
+          blurTimelineMapRef.current[targetTimeInSeconds] = false;
+          console.log(`⏭️ [Lookahead] Skipped: Sec ${targetTimeInSeconds}`);
       } finally {
           isAiProcessingRef.current = false; 
       }
   };
 
+  // 🚨 [NEW] Lookahead Background Queue Loop (এটি ভিডিওর চেয়ে ১০ সেকেন্ড সামনে থাকবে)
+  useEffect(() => {
+    const lookaheadInterval = setInterval(async () => {
+        if (!videoSource || isAudioMode || isAiProcessingRef.current) return;
+        if (!player || player.duration <= 0) return;
+
+        const currentSec = player.currentTime;
+        // আমরা ভিডিওর বর্তমান সময় থেকে সামনের ২, ৪, ৬, ৮ এবং ১০ সেকেন্ডের জন্য ছবি কাটব
+        const lookaheadOffsets = [0, 2, 4, 6, 8, 10]; 
+
+        for (let offset of lookaheadOffsets) {
+            // সময়কে ২ সেকেন্ডের চাঙ্কে ভাগ করা হলো (যাতে 2.1 এবং 3.8 সেকেন্ড একই চাঙ্কে পড়ে)
+            const targetChunkTime = Math.floor((currentSec + offset) / 2) * 2;
+            
+            if (targetChunkTime > player.duration) continue;
+
+            // যদি এই চাঙ্কটি ম্যাপে না থাকে, তবে প্রসেস করা শুরু করো
+            if (blurTimelineMapRef.current[targetChunkTime] === undefined) {
+                await preComputeBlurForTime(targetChunkTime, videoSource);
+                break; // একবারে শুধু একটি ফ্রেম প্রসেস করবে, যাতে মোবাইল হ্যাং না হয়
+            }
+        }
+    }, 500); // প্রতি আধা সেকেন্ড পরপর চেক করবে নতুন কাজ আছে কি না
+
+    return () => clearInterval(lookaheadInterval);
+  }, [videoSource, isAudioMode, player]);
+
+  // 🚨 [MODIFIED] Player UI Sync Loop (এটি এখন আর এআই রান করবে না, শুধু ম্যাপ থেকে ডেটা পড়বে)
   useEffect(() => {
     const interval = setInterval(async () => {
         if (isSyncingRef.current) return; 
@@ -603,12 +632,13 @@ export default function GlobalPlayer() {
                             setCurrentTime(player.currentTime);
                             if (player.duration > 0) setDuration(player.duration);
                             
-                            // 🚨 [REAL TIME AI TRIGGER LOGIC] 
-                            if (videoSource && !isAudioMode) {
-                                const currentSec = player.currentTime;
-                                if (Math.abs(currentSec - lastAiCheckTimeRef.current) >= 2 && !isAiProcessingRef.current) {
-                                    lastAiCheckTimeRef.current = currentSec;
-                                    runSafeViewingAI(currentSec, videoSource);
+                            // ⚡ Zero-Lag Checking: শুধু ম্যাপ চেক করে ব্লার অন/অফ করবে
+                            if (!isAudioMode) {
+                                const currentChunkTime = Math.floor(player.currentTime / 2) * 2;
+                                const mappedBlurDecision = blurTimelineMapRef.current[currentChunkTime];
+                                
+                                if (mappedBlurDecision !== undefined) {
+                                    setIsBlurred(mappedBlurDecision);
                                 }
                             }
                         }
