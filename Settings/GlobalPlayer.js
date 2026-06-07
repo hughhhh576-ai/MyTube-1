@@ -18,6 +18,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer'; 
 import * as jpeg from 'jpeg-js';
+import { Asset } from 'expo-asset'; 
 import FaceDetection from '@react-native-ml-kit/face-detection';
 import { loadTensorflowModel } from 'react-native-fast-tflite';
 
@@ -33,7 +34,7 @@ const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
-// 🚨 [NEW] সেফটি ফাংশন (মেমরি লিক ও ক্র্যাশ রোধ করার জন্য)
+// সেফটি ফাংশন
 const safePlay = (p) => {
     try { if (p && typeof p.play === 'function') { const res = p.play(); if (res && res.catch) res.catch(()=>{}); } } catch(e){}
 };
@@ -305,7 +306,7 @@ export default function GlobalPlayer() {
 
       if (mode) {
           resumeTimeRef.current = player ? player.currentTime : currentTime;
-          safePause(player); // 👈 Updated
+          safePause(player);
           setIsPlayingUI(true); 
 
           let audioUrlToPlay = cachedAudioUrlRef.current;
@@ -327,7 +328,7 @@ export default function GlobalPlayer() {
           }
       } else {
           resumeTimeRef.current = player ? player.currentTime : currentTime;
-          safePause(player); // 👈 Updated
+          safePause(player);
           
           setVideoSource(streamUrl); 
 
@@ -353,7 +354,7 @@ export default function GlobalPlayer() {
                   if (resumeTimeRef.current > 0) {
                       safeSeek(player, resumeTimeRef.current);
                   }
-                  safePlay(player); // 👈 Updated
+                  safePlay(player); 
 
                   if (!isAudioMode && streamModeRef.current === 'separate' && syncAudioRef.current) {
                       safeSeek(syncAudioRef.current, resumeTimeRef.current); 
@@ -447,12 +448,41 @@ export default function GlobalPlayer() {
       setShowSettingsMenu(false);
   };
 
-  // 🚨 [REAL TFLITE MODEL LOADER & CORE INFERENCE ENGINE]
+  // 🚨 [FIXED AI LOADER] - মডেল ডিভাইসের লোকাল মেমরিতে ডাউনলোড করে সেখান থেকে রিড করা হচ্ছে
   const loadGenderModelAsync = async () => {
       if (!genderModelRef.current) {
           try {
-              genderModelRef.current = await loadTensorflowModel(require('../assets/gender_classification.tflite'));
-              console.log("AI Model Loaded Perfectly!");
+              // ১. এক্সপোর মাধ্যমে মডেল অ্যাসেট লোড করা
+              const modelAsset = Asset.fromModule(require('../assets/gender_classification.tflite'));
+              await modelAsset.downloadAsync();
+              let modelUri = modelAsset.localUri || modelAsset.uri;
+
+              // ২. ডিভাইসের লোকাল মেমরি ডিরেক্টরি সেট করা
+              const localFilePath = FileSystem.documentDirectory + 'gender_model.tflite';
+
+              // ৩. যদি আগের কোনো ক্র্যাশ করা ফাইল থাকে, সেটি ডিলিট করা
+              const fileInfo = await FileSystem.getInfoAsync(localFilePath);
+              if (fileInfo.exists) {
+                  await FileSystem.deleteAsync(localFilePath);
+              }
+
+              // ৪. যদি সার্ভারের লিংক হয়, তবে ডাউনলোড করে মেমরিতে সেভ করা
+              if (modelUri.startsWith('http')) {
+                  const downloadRes = await FileSystem.downloadAsync(modelUri, localFilePath);
+                  modelUri = downloadRes.uri;
+              } else {
+                  // আগে থেকেই লোকাল হলে মেমরিতে কপি করা
+                  await FileSystem.copyAsync({ from: modelUri, to: localFilePath });
+                  modelUri = localFilePath;
+              }
+
+              // ৫. TFLite C++ ইঞ্জিনের জন্য 'file://' লেখাটি কেটে পারফেক্ট পাথ তৈরি করা
+              const cleanPath = modelUri.replace('file://', '');
+
+              // ৬. ফাইনালি মেমরি থেকে মডেল রান করা
+              genderModelRef.current = await loadTensorflowModel(cleanPath);
+              console.log("AI Model Loaded Perfectly from Memory: ", cleanPath);
+
           } catch (e) {
               console.log("Model Loading Failure:", e);
           }
@@ -526,7 +556,6 @@ export default function GlobalPlayer() {
 
           if (faces && faces.length > 0) {
               const face = faces[0];
-              // 🚨 [FIXED] এখানে frame বা bounds যা-ই আসুক, এটি হ্যান্ডেল করতে পারবে
               const box = face.frame || face.bounds || {}; 
               
               const originX = Math.max(0, box.left ?? box.x ?? box.originX ?? 0);
@@ -534,7 +563,6 @@ export default function GlobalPlayer() {
               const width = box.width ?? 0;
               const height = box.height ?? 0;
               
-              // 🚨 [FIXED] ভ্যালিড হাইট এবং উইডথ না পেলে ক্রপ করবে না
               if (width > 0 && height > 0) {
                   const croppedFace = await ImageManipulator.manipulateAsync(
                       uri,
@@ -551,7 +579,6 @@ export default function GlobalPlayer() {
               setIsBlurred(false); 
           }
       } catch (error) {
-          // সাইলেন্ট ইগনোর: থাম্বনেইল বা ক্রপ এরর হলে কনসোল স্প্যাম করবে না
           setIsBlurred(false);
       } finally {
           isAiProcessingRef.current = false; 
@@ -572,7 +599,6 @@ export default function GlobalPlayer() {
                     setCurrentTime(pendingSeekRef.current);
                     pendingSeekRef.current = null;
                 } else if (!isSlidingRef.current) {
-                    // Try catch যুক্ত করা হয়েছে Released Player Error এড়ানোর জন্য
                     try {
                         if (player.currentTime > 0 || player.playing) {
                             setCurrentTime(player.currentTime);
@@ -696,7 +722,7 @@ export default function GlobalPlayer() {
       if (isFullscreen) await toggleFullscreen();
       setStreamUrl(null);
       setVideoSource(null); 
-      safePause(player); // 👈 Updated
+      safePause(player); 
       safeReleaseAudio();
       setIsBlurred(false); 
   };
@@ -784,10 +810,10 @@ export default function GlobalPlayer() {
                 <TouchableOpacity onPress={async () => {
                     if (player) {
                         if (player.playing) {
-                            safePause(player); // 👈 Updated
+                            safePause(player); 
                             if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
                         } else {
-                            safePlay(player); // 👈 Updated
+                            safePlay(player); 
                             if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
                         }
                     }
@@ -934,10 +960,10 @@ export default function GlobalPlayer() {
                     <TouchableOpacity style={styles.miniCtrlBtn} onPress={async () => {
                         if (player) {
                             if (player.playing) {
-                                safePause(player); // 👈 Updated
+                                safePause(player); 
                                 if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.pause();
                             } else {
-                                safePlay(player); // 👈 Updated
+                                safePlay(player); 
                                 if (!isAudioMode && streamMode === 'separate' && syncAudioRef.current) syncAudioRef.current.play();
                             }
                         }
