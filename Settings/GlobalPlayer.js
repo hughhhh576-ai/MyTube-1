@@ -13,7 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // 🚨 [REAL AI INTEGRATION PACKAGES]
 import { BlurView } from 'expo-blur';
-import * as VideoThumbnails from 'expo-video-thumbnails';
+import { captureRef } from 'react-native-view-shot'; // 👈 [NEW] আল্টিমেট স্ক্রিনশট প্যাকেজ
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer'; 
@@ -97,6 +97,9 @@ export default function GlobalPlayer() {
   const isAiProcessingRef = useRef(false);
   const lastAiCheckTimeRef = useRef(0);
   const genderModelRef = useRef(null);
+  
+  // 👈 স্ক্রিনশট নেওয়ার জন্য নতুন রেফারেন্স
+  const snapshotRef = useRef(null);
 
   useEffect(() => {
     const setupAudio = async () => {
@@ -376,26 +379,21 @@ export default function GlobalPlayer() {
       } catch (error) { return false; }
   };
 
-  // 🚨 [REAL-TIME AI LOOP] - স্ট্যাবল এবং হাই-কোয়ালিটি
-  const runRealTimeAI = async (timeInSeconds, vUrl) => {
-      if (isAiProcessingRef.current) return;
+  // 🚨 [NEW] দ্য আল্টিমেট স্ক্রিনশট হ্যাক (Zero Network Timeout)
+  const runRealTimeAI = async (timeInSeconds) => {
+      if (!snapshotRef.current) return;
       isAiProcessingRef.current = true;
-      
-      console.log(`\n--- 🤖 Checking current frame: ${timeInSeconds.toFixed(1)}s ---`);
+      console.log(`\n--- 📸 Capturing Frame at ${timeInSeconds.toFixed(1)}s ---`);
       
       try {
-          // 👈 রিয়েল-টাইমে হাই-কোয়ালিটি (0.8) ছবি কাটা হচ্ছে
-          const thumbnailPromise = VideoThumbnails.getThumbnailAsync(vUrl, {
-              time: Math.floor(timeInSeconds * 1000), 
-              quality: 0.8, 
+          // ইন্টারনেট থেকে না নামিয়ে, সরাসরি প্লেয়ারের লাইভ স্ক্রিনশট নেওয়া হচ্ছে!
+          const uri = await captureRef(snapshotRef, {
+              format: 'jpg',
+              quality: 0.8,
           });
 
-          // 👈 ৩ সেকেন্ডের সেফটি টাইমআউট
-          const timeoutPromise = new Promise((_, reject) => {
-              setTimeout(() => reject(new Error("Timeout")), 3000); 
-          });
+          console.log("✅ Screenshot Captured instantly!");
 
-          const { uri } = await Promise.race([thumbnailPromise, timeoutPromise]);
           const faces = await detectFacesWithMLKit(uri);
           console.log(`👤 Faces found: ${faces.length}`);
 
@@ -421,8 +419,7 @@ export default function GlobalPlayer() {
               setIsBlurred(false); 
           }
       } catch (error) {
-          console.log(`⏭️ Skipped Frame: ${error.message}`);
-          // যদি ফ্রেম স্কিপ হয়, ব্লার সরাবে না, আগের অবস্থায় রেখে দেবে
+          console.log(`❌ AI Failed: ${error.message || error}`);
       } finally {
           isAiProcessingRef.current = false; 
       }
@@ -447,12 +444,12 @@ export default function GlobalPlayer() {
                             setCurrentTime(player.currentTime);
                             if (player.duration > 0) setDuration(player.duration);
                             
-                            // 🚨 [REAL TIME AI TRIGGER] - প্রতি ৩ সেকেন্ড পরপর বর্তমান ফ্রেম স্ক্যান করবে
-                            if (videoSource && !isAudioMode) {
+                            // 🚨 [REAL TIME AI TRIGGER] - ৩ সেকেন্ড পরপর লাইভ স্ক্রিনশট নেবে
+                            if (videoSource && !isAudioMode && player.playing) {
                                 const currentSec = player.currentTime;
                                 if (Math.abs(currentSec - lastAiCheckTimeRef.current) >= 3 && !isAiProcessingRef.current) {
                                     lastAiCheckTimeRef.current = currentSec;
-                                    runRealTimeAI(currentSec, videoSource);
+                                    runRealTimeAI(currentSec);
                                 }
                             }
                         }
@@ -564,9 +561,12 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
-                        <VideoView key={videoSource} ref={videoViewRef} player={player} style={styles.video} contentFit="contain" nativeControls={false} allowsPictureInPicture />
+                        {/* 🚨 [NEW] স্ক্রিনশটের জন্য শুধু ভিডিওটি Ref করা হয়েছে, ব্লার নয় */}
+                        <View ref={snapshotRef} collapsable={false} style={styles.video}>
+                            <VideoView player={player} style={styles.video} contentFit="contain" nativeControls={false} allowsPictureInPicture />
+                        </View>
                         
-                        {/* 🚨 [REAL TIME SMART BLUR VIEW OVERLAY] */}
+                        {/* 🚨 [REAL TIME SMART BLUR] - ব্লার থাকবে স্ক্রিনশট এরিয়ার বাইরে, যাতে এআই অন্ধ না হয় */}
                         {isBlurred && !isAudioMode && (
                             <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />
                         )}
