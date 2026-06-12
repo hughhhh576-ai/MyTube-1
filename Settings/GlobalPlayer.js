@@ -344,9 +344,14 @@ export default function GlobalPlayer() {
           await loadGenderModelAsync();
           if (!genderModelRef.current) return false;
 
-          const MODEL_SIZE = 224; 
+          // 🚨 [SMART FIX 1] মডেলের ডায়নামিক সাইজ বের করা হচ্ছে
+          const inputTensor = genderModelRef.current.inputs?.[0];
+          const MODEL_WIDTH = inputTensor?.shape?.[1] || 224;
+          const MODEL_HEIGHT = inputTensor?.shape?.[2] || 224;
+          const isUint8 = inputTensor?.dataType === 'uint8' || inputTensor?.dataType === 'int8';
+
           const resizedImage = await ImageManipulator.manipulateAsync(
-              croppedFaceUri, [{ resize: { width: MODEL_SIZE, height: MODEL_SIZE } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+              croppedFaceUri, [{ resize: { width: MODEL_WIDTH, height: MODEL_HEIGHT } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
           );
 
           const base64Data = await FileSystem.readAsStringAsync(resizedImage.uri, { encoding: FileSystem.EncodingType.Base64 });
@@ -354,16 +359,8 @@ export default function GlobalPlayer() {
           const rawBuffer = new Uint8Array(decode(base64Data));
           const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
 
-          // 🚨 [THE HERMES BUG FIX] - প্রথমে খাঁটি ArrayBuffer তৈরি করা হচ্ছে!
-          const inputTensor = genderModelRef.current.inputs?.[0];
-          const isUint8 = inputTensor?.dataType === 'uint8' || inputTensor?.dataType === 'int8';
-          
-          const bufferSize = MODEL_SIZE * MODEL_SIZE * 3 * (isUint8 ? 1 : 4);
-          
-          // ১. খাঁটি ArrayBuffer তৈরি
+          const bufferSize = MODEL_WIDTH * MODEL_HEIGHT * 3 * (isUint8 ? 1 : 4);
           const pureInputBuffer = new ArrayBuffer(bufferSize);
-          
-          // ২. বাফারের উপর ভিউ তৈরি
           const inputData = isUint8 ? new Uint8Array(pureInputBuffer) : new Float32Array(pureInputBuffer);
 
           let rgbIndex = 0;
@@ -379,12 +376,10 @@ export default function GlobalPlayer() {
               }
           }
 
-          // ৩. কোনো ব্র্যাকেট ছাড়া সরাসরি খাঁটি ArrayBuffer পাঠানো হলো
           const output = await genderModelRef.current.run([pureInputBuffer]);
 
           let probability = 0;
 
-          // 🚨 [BULLETPROOF OUTPUT PARSING]
           if (output && output.length > 0) {
               const rawOut = output[0];
               let outBuffer;
@@ -415,7 +410,6 @@ export default function GlobalPlayer() {
 
           console.log(`👩 Female Probability: ${probability.toFixed(3)}`);
           
-          // থ্রেশহোল্ড সেট করা হলো
           return probability > 0.2; 
           
       } catch (error) { 
@@ -434,8 +428,6 @@ export default function GlobalPlayer() {
               quality: 0.8,
           });
 
-          setAiVisionImage(uri);
-
           const faces = await detectFacesWithMLKit(uri);
           
           if (faces && faces.length > 0) {
@@ -443,15 +435,24 @@ export default function GlobalPlayer() {
               const face = faces[0];
               const box = face.frame || face.bounds || {}; 
               
-              const originX = Math.max(0, box.left ?? box.x ?? box.originX ?? 0);
-              const originY = Math.max(0, box.top ?? box.y ?? box.originY ?? 0);
-              const width = box.width ?? 0;
-              const height = box.height ?? 0;
+              // 🚨 [SMART FIX 2] পারফেক্ট ক্রপিং লজিক
+              let originX = Math.floor(box.left ?? box.x ?? box.originX ?? 0);
+              let originY = Math.floor(box.top ?? box.y ?? box.originY ?? 0);
+              let width = Math.floor(box.width ?? 0);
+              let height = Math.floor(box.height ?? 0);
+              
+              originX = Math.max(0, originX);
+              originY = Math.max(0, originY);
+              width = Math.max(10, width);
+              height = Math.max(10, height);
               
               if (width > 0 && height > 0) {
                   const croppedFace = await ImageManipulator.manipulateAsync(
                       uri, [{ crop: { originX, originY, width, height } }], { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
                   );
+                  
+                  // 🚨 [SMART FIX 3] ডানদিকের বক্সে এখন শুধু ক্রপ করা মুখটি দেখা যাবে!
+                  setAiVisionImage(croppedFace.uri);
                   
                   const isFemale = await checkGenderWithTFLite(croppedFace.uri);
                   
@@ -622,7 +623,7 @@ export default function GlobalPlayer() {
                             <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />
                         )}
 
-                        {/* 🤖 এআইয়ের চোখ (টেস্টিং শেষ হলে মুছে ফেলতে পারেন) */}
+                        {/* 🤖 এআইয়ের চোখ (এখন শুধু মানুষের মুখ দেখাবে, পুরো ভিডিও নয়) */}
                         {aiVisionImage && isInteractiveFull && (
                             <View style={styles.debugWindow}>
                                 <Image source={{ uri: aiVisionImage }} style={{ flex: 1, width: '100%', height: '100%' }} resizeMode="contain" />
