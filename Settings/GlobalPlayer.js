@@ -97,6 +97,9 @@ export default function GlobalPlayer() {
   const [isBlurred, setIsBlurred] = useState(false);
   const [aiVisionImage, setAiVisionImage] = useState(null); 
   
+  // 🚨 [NEW STATE] পুরো স্ক্রিনের রিয়েল-টাইম ফ্রেমটি সেভ রাখার জন্য
+  const [fullFrameUri, setFullFrameUri] = useState(null);
+  
   const isAiProcessingRef = useRef(false);
   const lastAiCheckTimeRef = useRef(0);
   const genderModelRef = useRef(null);
@@ -216,6 +219,7 @@ export default function GlobalPlayer() {
       
       setIsBlurred(false); 
       setAiVisionImage(null); 
+      setFullFrameUri(null); // 🚨 রিসেট
       isAiProcessingRef.current = false;
       lastAiCheckTimeRef.current = 0;
 
@@ -339,11 +343,10 @@ export default function GlobalPlayer() {
       try { return await FaceDetection.detect(uri); } catch (error) { return []; }
   };
 
-  // 🚨 [SMART FIX 1 & 2] - ডাইনামিক মডেল সাইজ এবং পিওর বাফার
   const checkGenderWithTFLite = async (croppedFaceUri) => {
       try {
           await loadGenderModelAsync();
-          if (!genderModelRef.current) return 0; // আমরা এখন বুলিয়ানের বদলে প্রোবাবিলিটি রিটার্ন করছি
+          if (!genderModelRef.current) return 0;
 
           const inputTensor = genderModelRef.current.inputs?.[0];
           const MODEL_WIDTH = inputTensor?.shape?.[1] || 224;
@@ -408,8 +411,7 @@ export default function GlobalPlayer() {
           }
 
           console.log(`👩 Female Probability: ${probability.toFixed(3)}`);
-          
-          return probability; // সরাসরি প্রোবাবিলিটি রিটার্ন করা হলো
+          return probability;
           
       } catch (error) { 
           console.log("TFLite Checking Error:", error);
@@ -427,14 +429,15 @@ export default function GlobalPlayer() {
               quality: 0.8,
           });
 
+          // 🚨 [SAVING THE FRAME] ব্লার করার জন্য পুরো ফ্রেমটি সেভ করে রাখা হলো
+          setFullFrameUri(uri);
+
           const faces = await detectFacesWithMLKit(uri);
           
           if (faces && faces.length > 0) {
               console.log(`👤 Faces found: ${faces.length}`);
-              
               let shouldBlurVideo = false;
 
-              // 🚨 [SMART FIX 3] স্ক্রিনে থাকা সবগুলো ফেস চেক করা হচ্ছে
               for (let i = 0; i < faces.length; i++) {
                   const face = faces[i];
                   const box = face.frame || face.bounds || {}; 
@@ -454,17 +457,15 @@ export default function GlobalPlayer() {
                           uri, [{ crop: { originX, originY, width, height } }], { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
                       );
                       
-                      // শুধু প্রথম ফেসটি বক্সে দেখাবে
                       if (i === 0) {
                           setAiVisionImage(croppedFace.uri);
                       }
                       
                       const femaleProbability = await checkGenderWithTFLite(croppedFace.uri);
                       
-                      // 🎯 থ্রেশহোল্ড: প্রোবাবিলিটি ৫০% বা তার বেশি হলে ব্লার ট্রিগার
                       if (femaleProbability >= 0.50) {
                           shouldBlurVideo = true;
-                          break; // একটি মেয়ে ফেস পেলেই লুপ ভেঙে ব্লার করে দেবে
+                          break; 
                       }
                   }
               }
@@ -499,7 +500,6 @@ export default function GlobalPlayer() {
                             setCurrentTime(player.currentTime);
                             if (player.duration > 0) setDuration(player.duration);
                             
-                            // 🤖 ৩ সেকেন্ড পরপর এআই চেক 
                             if (videoSource && !isAudioMode && player.playing) {
                                 const currentSec = player.currentTime;
                                 if (Math.abs(currentSec - lastAiCheckTimeRef.current) >= 3 && !isAiProcessingRef.current) {
@@ -616,7 +616,6 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
-                        {/* 🚨 surfaceType="textureView" - কালো স্ক্রিন ঠেকানোর ম্যাজিক */}
                         <View ref={snapshotRef} collapsable={false} style={styles.video}>
                             <VideoView 
                                 player={player} 
@@ -628,12 +627,24 @@ export default function GlobalPlayer() {
                             />
                         </View>
                         
-                        {/* 🚨 ব্লার ভিউ - এআই মেয়ে ডিটেক্ট করলেই এটি চালু হবে */}
-                        {isBlurred && !isAudioMode && (
-                            <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />
+                        {/* 🚨 [THE ULTIMATE HACK] Android-এর হার্ডওয়্যার লেয়ার লিমিটেশন বাইপাস! */}
+                        {isBlurred && fullFrameUri && !isAudioMode && (
+                            <View style={[StyleSheet.absoluteFillObject, { zIndex: 100, overflow: 'hidden' }]}>
+                                {/* ভিডিওর ওপর স্ক্রিনশট বসিয়ে সেটিকে ব্লার করা হলো */}
+                                <Image 
+                                    source={{ uri: fullFrameUri }} 
+                                    style={[StyleSheet.absoluteFillObject, { transform: [{ scale: 1.1 }] }]} 
+                                    blurRadius={50} 
+                                />
+                                {/* সুন্দর একটি ডার্ক ওভারলে এবং আইকন */}
+                                <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }]}>
+                                    <Ionicons name="eye-off-outline" size={80} color="#FFF" />
+                                    <Text style={{ color: '#FFF', fontSize: 18, fontWeight: 'bold', marginTop: 15 }}>মহিলা শনাক্ত হয়েছে</Text>
+                                    <Text style={{ color: '#FFF', fontSize: 12, marginTop: 5 }}>(Censored by AI)</Text>
+                                </View>
+                            </View>
                         )}
 
-                        {/* 🤖 এআইয়ের চোখ (এখন শুধু মানুষের মুখ দেখাবে, পুরো ভিডিও নয়) */}
                         {aiVisionImage && isInteractiveFull && (
                             <View style={styles.debugWindow}>
                                 <Image source={{ uri: aiVisionImage }} style={{ flex: 1, width: '100%', height: '100%' }} resizeMode="contain" />
