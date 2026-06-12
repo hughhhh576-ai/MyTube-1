@@ -354,16 +354,17 @@ export default function GlobalPlayer() {
           const rawBuffer = new Uint8Array(decode(base64Data));
           const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
 
-          // 🚨 [THE SMART FIX] - মডেলের ইনপুট চেক করে পিক্সেল ডেটা বানানো হচ্ছে
-          const inputTensor = genderModelRef.current.inputs[0];
-          const isUint8 = inputTensor.dataType === 'uint8';
+          // 🚨 [THE HERMES BUG FIX] - প্রথমে খাঁটি ArrayBuffer তৈরি করা হচ্ছে!
+          const inputTensor = genderModelRef.current.inputs?.[0];
+          const isUint8 = inputTensor?.dataType === 'uint8' || inputTensor?.dataType === 'int8';
           
-          let inputData;
-          if (isUint8) {
-              inputData = new Uint8Array(MODEL_SIZE * MODEL_SIZE * 3);
-          } else {
-              inputData = new Float32Array(MODEL_SIZE * MODEL_SIZE * 3);
-          }
+          const bufferSize = MODEL_SIZE * MODEL_SIZE * 3 * (isUint8 ? 1 : 4);
+          
+          // ১. খাঁটি ArrayBuffer তৈরি
+          const pureInputBuffer = new ArrayBuffer(bufferSize);
+          
+          // ২. বাফারের উপর ভিউ তৈরি
+          const inputData = isUint8 ? new Uint8Array(pureInputBuffer) : new Float32Array(pureInputBuffer);
 
           let rgbIndex = 0;
           for (let i = 0; i < rawImageData.data.length; i += 4) {
@@ -378,23 +379,34 @@ export default function GlobalPlayer() {
               }
           }
 
-          const output = await genderModelRef.current.run([inputData.buffer]);
+          // ৩. কোনো ব্র্যাকেট ছাড়া সরাসরি খাঁটি ArrayBuffer পাঠানো হলো
+          const output = await genderModelRef.current.run([pureInputBuffer]);
 
           let probability = 0;
 
+          // 🚨 [BULLETPROOF OUTPUT PARSING]
           if (output && output.length > 0) {
-              const firstTensor = output[0];
+              const rawOut = output[0];
+              let outBuffer;
               
-              if (typeof firstTensor === 'number') {
-                  probability = firstTensor;
-              } else if (firstTensor && firstTensor.length !== undefined && firstTensor.length > 0) {
-                  probability = firstTensor[0];
+              if (rawOut instanceof ArrayBuffer) {
+                  outBuffer = rawOut;
+              } else if (rawOut && rawOut.buffer instanceof ArrayBuffer) {
+                  outBuffer = rawOut.buffer;
+              } else {
+                  outBuffer = new Float32Array(rawOut).buffer;
               }
-          }
 
-          // যদি মডেলটি Uint8 হয়, তবে তার আউটপুট ২৫৫ এর মাঝে আসবে, তাই তাকে পার্সেন্টেজ বানানো হলো
-          if (probability > 1) {
-              probability = probability / 255.0;
+              const outTensor = genderModelRef.current.outputs?.[0];
+              const isOutUint8 = outTensor?.dataType === 'uint8' || outTensor?.dataType === 'int8';
+
+              if (isOutUint8) {
+                  const outArray = new Uint8Array(outBuffer);
+                  probability = outArray[0] / 255.0;
+              } else {
+                  const outArray = new Float32Array(outBuffer);
+                  probability = outArray[0];
+              }
           }
 
           if (typeof probability !== 'number' || isNaN(probability)) {
@@ -403,6 +415,7 @@ export default function GlobalPlayer() {
 
           console.log(`👩 Female Probability: ${probability.toFixed(3)}`);
           
+          // থ্রেশহোল্ড সেট করা হলো
           return probability > 0.2; 
           
       } catch (error) { 
