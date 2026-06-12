@@ -362,26 +362,36 @@ export default function GlobalPlayer() {
               rgbPixels[rgbIndex++] = rawImageData.data[i + 2] / 255.0; 
           }
 
-          // 🚨 [THE MAGIC FIX] - ডাবল ব্র্যাকেট [[ ]] সরিয়ে সিঙ্গেল ব্র্যাকেট [ ] করা হলো!
-          const output = await genderModelRef.current.run([rgbPixels.buffer]);
+          const output = await genderModelRef.current.run([[rgbPixels.buffer]]);
+          
+          // 🚨 [BULLETPROOF FIX] - মডেলের রেজাল্ট যেভাবেই আসুক, এটি নিখুঁতভাবে বের করে আনবে
+          let probability = 0;
 
-          if (output && output.length > 0) {
-              let probability = 0;
+          if (output && Array.isArray(output) && output.length > 0) {
+              const firstTensor = output[0];
               
-              // 🚨 [BULLETPROOF PARSING] - মডেল Float32 নাকি Uint8 যাই হোক না কেন, নিখুঁতভাবে রিড করবে
-              if (output[0].byteLength >= 4) {
-                  const outputFloat32 = new Float32Array(output[0].buffer);
-                  probability = outputFloat32[0]; // Float32 Probability
-              } else {
-                  probability = output[0][0] / 255.0; // Uint8 Probability
+              if (typeof firstTensor === 'number') {
+                  probability = firstTensor;
+              } else if (firstTensor && firstTensor.length !== undefined && firstTensor.length > 0) {
+                  probability = firstTensor[0];
               }
-              
-              console.log(`👩 Female Probability: ${probability.toFixed(3)}`);
-              
-              // 🚨 থ্রেশহোল্ড সেট করা হলো (০.২ এর উপরে গেলেই মেয়ে ভাববে)
-              return probability > 0.2; 
           }
-          return false;
+
+          // যদি মডেলের আউটপুট ০-২৫৫ রেঞ্জে আসে (Uint8), তবে তাকে ০-১ এর মধ্যে আনা হলো
+          if (probability > 1) {
+              probability = probability / 255.0;
+          }
+
+          // যদি কোনো কারণে Probability undefined হয়ে যায়, তাকে ডিফল্টভাবে ০ ধরা হবে
+          if (typeof probability !== 'number' || isNaN(probability)) {
+              probability = 0;
+          }
+
+          console.log(`👩 Female Probability: ${probability.toFixed(3)}`);
+          
+          // 🚨 থ্রেশহোল্ড সেট করা হলো (০.২ এর উপরে গেলেই ব্লার হবে)
+          return probability > 0.2; 
+          
       } catch (error) { 
           console.log("TFLite Checking Error:", error);
           return false; 
@@ -569,6 +579,7 @@ export default function GlobalPlayer() {
             <Animated.View style={[styles.animatedVideoWrapper, { transform: [{ scale: scale }] }]}>
                 {videoSource ? (
                     <>
+                        {/* 🚨 surfaceType="textureView" */}
                         <View ref={snapshotRef} collapsable={false} style={styles.video}>
                             <VideoView 
                                 player={player} 
@@ -580,10 +591,12 @@ export default function GlobalPlayer() {
                             />
                         </View>
                         
+                        {/* 🚨 ব্লার ভিউ */}
                         {isBlurred && !isAudioMode && (
                             <BlurView intensity={100} tint="dark" style={StyleSheet.absoluteFillObject} />
                         )}
 
+                        {/* 🤖 এআইয়ের চোখ */}
                         {aiVisionImage && isInteractiveFull && (
                             <View style={styles.debugWindow}>
                                 <Image source={{ uri: aiVisionImage }} style={{ flex: 1, width: '100%', height: '100%' }} resizeMode="contain" />
