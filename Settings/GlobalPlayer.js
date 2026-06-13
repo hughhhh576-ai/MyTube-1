@@ -105,7 +105,6 @@ export default function GlobalPlayer() {
       }
   };
 
-  // 🚨 [THE FIX] Video Auto-Play Lifecycle 
   const player = useVideoPlayer(videoSource, (p) => {
     if (!videoSource) return; 
     try { p.loop = false; } catch(e) {}
@@ -115,7 +114,7 @@ export default function GlobalPlayer() {
     } else {
         safeSetMuted(p, false);
     }
-    // 🚨 ভিডিও সোর্স লোড হওয়া মাত্রই প্লে করবে!
+    // 🚨 অটো-প্লে ট্রিক
     safePlay(p);
   });
 
@@ -224,7 +223,6 @@ export default function GlobalPlayer() {
   const startPlayback = async (json) => {
     setStreamMode(json.streamType || 'combined'); streamModeRef.current = json.streamType || 'combined';
     setStreamUrl(json.url); 
-    // 🚨 State update will trigger the `useVideoPlayer` callback to auto-play
     setVideoSource(json.url); 
   };
 
@@ -346,7 +344,7 @@ export default function GlobalPlayer() {
       }
   };
 
-  // 🚨 [THE ZERO-DATA SPRITE SOLUTION]
+  // 🚨 [THE ZERO-DATA CACHED SPRITE SOLUTION]
   const SB_COLS = 5;
   const SB_ROWS = 5;
   const SB_FRAME_W = 160;
@@ -385,6 +383,7 @@ export default function GlobalPlayer() {
                   continue;
               }
 
+              // বাফার রুল
               if (targetSec > currentPlaybackSec + 15) {
                   await new Promise(r => setTimeout(r, 1000));
                   continue;
@@ -409,10 +408,12 @@ export default function GlobalPlayer() {
                   
                   const currentGridUrl = storyboardUrlTemplate.replace('$M', chunkNumber).replace('$L', '0').replace('$N', '0');
 
+                  // 🚨 Local Cache System: ছবি শুধু একবার ডাউনলোড হবে!
                   const localChunkPath = `${FileSystem.cacheDirectory}sb_chunk_${chunkNumber}.jpg`;
                   const chunkInfo = await FileSystem.getInfoAsync(localChunkPath);
 
                   if (!chunkInfo.exists) {
+                      console.log(`📥 Downloading Sprite Chunk ${chunkNumber} ONCE...`);
                       await FileSystem.downloadAsync(currentGridUrl, localChunkPath);
                   }
 
@@ -442,6 +443,7 @@ export default function GlobalPlayer() {
                   targetScanSecRef.current += SB_INTERVAL;
               }
 
+              // নিঃশ্বাস নেওয়ার সময়
               await new Promise(r => setTimeout(r, 500)); 
           }
       };
