@@ -15,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // 🚨 [REAL AI INTEGRATION PACKAGES]
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system'; 
+import * as FileSystem from 'expo-file-system/legacy'; 
 import { decode } from 'base64-arraybuffer'; 
 import * as jpeg from 'jpeg-js';
 import { Asset } from 'expo-asset'; 
@@ -114,7 +114,6 @@ export default function GlobalPlayer() {
     } else {
         safeSetMuted(p, false);
     }
-    // 🚨 অটো-প্লে ট্রিক
     safePlay(p);
   });
 
@@ -205,9 +204,16 @@ export default function GlobalPlayer() {
     return () => { playSub.remove(); };
   }, [isFullscreen, streamUrl, player]);
 
+  // 🚨 [RESTORED] ভিডিও কোয়ালিটি চেঞ্জ করার লজিক ঠিক করে দেওয়া হলো
   const fetchStreamUrl = async (vidId, targetQuality, fetchId) => {
     try {
+      const qStr = (targetQuality || '720p').toString().toUpperCase();
       let reqQ = 720;
+      if (qStr.includes('8K') || qStr.includes('4320')) reqQ = 4320;
+      else if (qStr.includes('4K') || qStr.includes('2160')) reqQ = 2160;
+      else if (qStr.includes('2K') || qStr.includes('1440')) reqQ = 1440;
+      else reqQ = parseInt(qStr.replace(/\D/g, '')) || 720;
+
       const res = await fetch(`${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${reqQ}&action=play`);
       const json = await res.json();
       if (fetchId !== fetchIdRef.current) return;
@@ -383,7 +389,6 @@ export default function GlobalPlayer() {
                   continue;
               }
 
-              // বাফার রুল
               if (targetSec > currentPlaybackSec + 15) {
                   await new Promise(r => setTimeout(r, 1000));
                   continue;
@@ -408,7 +413,6 @@ export default function GlobalPlayer() {
                   
                   const currentGridUrl = storyboardUrlTemplate.replace('$M', chunkNumber).replace('$L', '0').replace('$N', '0');
 
-                  // 🚨 Local Cache System: ছবি শুধু একবার ডাউনলোড হবে!
                   const localChunkPath = `${FileSystem.cacheDirectory}sb_chunk_${chunkNumber}.jpg`;
                   const chunkInfo = await FileSystem.getInfoAsync(localChunkPath);
 
@@ -443,7 +447,6 @@ export default function GlobalPlayer() {
                   targetScanSecRef.current += SB_INTERVAL;
               }
 
-              // নিঃশ্বাস নেওয়ার সময়
               await new Promise(r => setTimeout(r, 500)); 
           }
       };
