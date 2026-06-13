@@ -86,12 +86,20 @@ export default function GlobalPlayer() {
   const isSyncingRef = useRef(false);
   const pendingSeekRef = useRef(null); 
 
-  // 🚨 [NEW] BACKGROUND SCANNER STATES
+  // 🚨 BACKGROUND SCANNER STATES
   const aiDataMapRef = useRef({}); 
-  const targetScanSecRef = useRef(0); // ০, ৩, ৬, ৯ সেকেন্ড ট্র্যাকার
+  const targetScanSecRef = useRef(0); 
   const isAiProcessingRef = useRef(false); 
   
   const genderModelRef = useRef(null);
+
+  // 🚨 [FIXED] হারানো ফাংশনটি আবার যোগ করা হয়েছে
+  const safeReleaseAudio = () => {
+      if (syncAudioRef.current) { 
+          try { syncAudioRef.current.release(); } catch(e) {} 
+          syncAudioRef.current = null; 
+      }
+  };
 
   useEffect(() => {
     const setupAudio = async () => {
@@ -178,13 +186,13 @@ export default function GlobalPlayer() {
       setPlayerState('full');
       setStreamUrl(null); setVideoSource(null); resumeTimeRef.current = 0; 
       
-      // 🚨 নতুন ভিডিও শুরু হলে স্ক্যানার রিসেট করা হলো
       aiDataMapRef.current = {};
-      targetScanSecRef.current = 0; // আবার ০ সেকেন্ড থেকে স্ক্যান শুরু হবে
+      targetScanSecRef.current = 0; 
       isAiProcessingRef.current = false;
 
       setCurrentTime(0); scale.setValue(1); baseScaleRef.current = 1;
       triggerControls();
+      safeReleaseAudio(); // 🚨 এই ফাংশনটি খুঁজছিল অ্যাপ!
 
       const targetQuality = global.appSettings?.normalVideo || '720p';
       fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
@@ -209,7 +217,6 @@ export default function GlobalPlayer() {
     setStreamMode(json.streamType || 'combined'); streamModeRef.current = json.streamType || 'combined';
     setStreamUrl(json.url); setVideoSource(json.url); 
   };
-
 
   // 🤖 -------------------- AI ENGINE START -------------------- 🤖
   
@@ -328,7 +335,7 @@ export default function GlobalPlayer() {
       }
   };
 
-  // 🚨 THE BUFFER SCANNER (আপনার নির্দেশ অনুযায়ী)
+  // 🚨 THE BUFFER SCANNER (TESTING MODE)
   useEffect(() => {
       const bufferScanner = setInterval(async () => {
           if (!player || player.duration <= 0 || isAiProcessingRef.current || !videoSource) return;
@@ -336,28 +343,21 @@ export default function GlobalPlayer() {
           let targetSec = targetScanSecRef.current;
           const duration = player.duration;
 
-          // ভিডিও শেষ হয়ে গেলে আর স্ক্যান করবে না
           if (targetSec > duration) return;
 
           isAiProcessingRef.current = true;
 
           try {
-              // 🚨 [PROBING THE BUFFER]
-              // আমরা ভিডিও ইঞ্জিনকে বলছি ছবি দিতে। যদি ভিডিও ওই পর্যন্ত লোড না হয়ে থাকে, তবে এটি আটকে যাবে।
-              // তাই আমরা একটি ২ সেকেন্ডের Promise Race (Timeout) দিয়েছি। 
               const extractPromise = player.generateThumbnailsAsync([targetSec]);
               const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 2000));
               
               const thumbs = await Promise.race([extractPromise, timeoutPromise]);
 
               if (thumbs && thumbs.length > 0) {
-                  // ফ্রেম পাওয়া গেছে (অর্থাৎ ভিডিও এই পর্যন্ত লোড হয়েছে)
                   const result = await processFrameForGender(thumbs[0].uri);
                   
-                  // ম্যাপে সেভ করা হচ্ছে
                   aiDataMapRef.current[targetSec] = result;
                   
-                  // 📊 টার্মিনালে সুন্দর করে প্রিন্ট করা হচ্ছে
                   let terminalLog = `\n--- 📊 AI DATA MAP (Loaded Buffer) ---\n`;
                   Object.keys(aiDataMapRef.current)
                       .map(Number)
@@ -367,22 +367,16 @@ export default function GlobalPlayer() {
                       });
                   console.log(terminalLog);
                   
-                  // সফল হওয়ায় পরবর্তী ৩ সেকেন্ডে চলে গেল
                   targetScanSecRef.current += 3;
-              } else {
-                  // ফ্রেম ফাঁকা আসলে
-                  // console.log(`[${targetSec}s] Frame is empty. Waiting...`);
               }
 
           } catch(e) {
-              // TIMEOUT মানে ওই সেকেন্ডের ভিডিও এখনো ইন্টারনেট থেকে লোড হয়নি
-              // তাই আমরা targetScanSecRef বাড়াবো না। সে এখানেই অপেক্ষা করবে।
-              // console.log(`⏳ [${targetSec}s] Video not buffered yet. Waiting for load...`);
+              // Timeout - waiting for buffer
           } finally {
               isAiProcessingRef.current = false;
           }
           
-      }, 1000); // প্রতি ১ সেকেন্ড পরপর সে বাফার চেক করবে
+      }, 1000); 
 
       return () => clearInterval(bufferScanner);
   }, [player, videoSource]);
@@ -462,7 +456,7 @@ export default function GlobalPlayer() {
              <View style={styles.bottomBar}>
                 <Text style={styles.timeTextLeft}>{formatTime(currentTime)}</Text>
                 <View style={styles.sliderWrapper}>
-                    <Slider style={{ flex: 1, height: 40 }} minimumValue={0} maximumValue={duration} value={currentTime} onValueChange={(v) => setCurrentTime(v)} onSlidingComplete={async (v) => { await seekTo(v); triggerControls(); }} minimumTrackTintColor="#FF0000" maximumTrackTintColor="transparent" thumbTintColor="#FF0000" />
+                    <Slider style={{ flex: 1, height: 40 }} minimumValue={0} maximumValue={duration} value={currentTime} onValueChange={(v) => setCurrentTime(v)} minimumTrackTintColor="#FF0000" maximumTrackTintColor="transparent" thumbTintColor="#FF0000" />
                 </View>
                 <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
                 <TouchableOpacity style={{marginLeft: 12}} onPress={toggleFullscreen}><Ionicons name={isFullscreen ? "contract" : "expand"} size={22} color="#FFF" /></TouchableOpacity>
