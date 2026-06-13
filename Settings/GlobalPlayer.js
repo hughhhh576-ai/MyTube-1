@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState, Platform } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, LogBox, Modal, BackHandler, Share, TouchableWithoutFeedback, Linking, AppState } from 'react-native';
 
 // 🚨 [LATEST PACKAGES]
 import { useVideoPlayer, VideoView } from 'expo-video'; 
@@ -12,15 +12,6 @@ import Slider from '@react-native-community/slider';
 import * as ScreenOrientation from 'expo-screen-orientation'; 
 import * as WebBrowser from 'expo-web-browser'; 
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
-
-// 🚨 [REAL AI INTEGRATION PACKAGES]
-import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system/legacy'; 
-import { decode } from 'base64-arraybuffer'; 
-import * as jpeg from 'jpeg-js';
-import { Asset } from 'expo-asset'; 
-import FaceDetection from '@react-native-ml-kit/face-detection';
-import { loadTensorflowModel } from 'react-native-fast-tflite';
 
 LogBox.ignoreLogs(['Video component', 'expo-audio', 'expo-video', 'InteractionManager', 'SafeAreaView']);
 
@@ -86,20 +77,9 @@ export default function GlobalPlayer() {
   const isSyncingRef = useRef(false);
   const pendingSeekRef = useRef(null); 
 
-  // 🚨 BACKGROUND SCANNER STATES
-  const aiDataMapRef = useRef({}); 
+  // 🚨 [NEW] শুধুমাত্র ফ্রেম কাটার স্ট্যাটাস
   const targetScanSecRef = useRef(0); 
-  const isAiProcessingRef = useRef(false); 
-  
-  const genderModelRef = useRef(null);
-
-  // 🚨 [FIXED] হারানো ফাংশনটি আবার যোগ করা হয়েছে
-  const safeReleaseAudio = () => {
-      if (syncAudioRef.current) { 
-          try { syncAudioRef.current.release(); } catch(e) {} 
-          syncAudioRef.current = null; 
-      }
-  };
+  const isExtractingRef = useRef(false);
 
   useEffect(() => {
     const setupAudio = async () => {
@@ -107,6 +87,13 @@ export default function GlobalPlayer() {
     };
     setupAudio();
   }, []);
+
+  const safeReleaseAudio = () => {
+      if (syncAudioRef.current) { 
+          try { syncAudioRef.current.release(); } catch(e) {} 
+          syncAudioRef.current = null; 
+      }
+  };
 
   const player = useVideoPlayer(videoSource, (p) => {
     if (!videoSource) return; 
@@ -186,13 +173,13 @@ export default function GlobalPlayer() {
       setPlayerState('full');
       setStreamUrl(null); setVideoSource(null); resumeTimeRef.current = 0; 
       
-      aiDataMapRef.current = {};
+      // 🚨 নতুন ভিডিও শুরু হলে স্ক্যানার রিসেট
       targetScanSecRef.current = 0; 
-      isAiProcessingRef.current = false;
+      isExtractingRef.current = false;
 
       setCurrentTime(0); scale.setValue(1); baseScaleRef.current = 1;
       triggerControls();
-      safeReleaseAudio(); // 🚨 এই ফাংশনটি খুঁজছিল অ্যাপ!
+      safeReleaseAudio();
 
       const targetQuality = global.appSettings?.normalVideo || '720p';
       fetchStreamUrl(data.videoId, targetQuality, fetchIdRef.current);
@@ -218,170 +205,55 @@ export default function GlobalPlayer() {
     setStreamUrl(json.url); setVideoSource(json.url); 
   };
 
-  // 🤖 -------------------- AI ENGINE START -------------------- 🤖
+
+  // 🚨 -------------------- LOADED BUFFER EXTRACTION ENGINE -------------------- 🚨
   
-  const loadGenderModelAsync = async () => {
-      if (!genderModelRef.current) {
-          try {
-              const asset = Asset.fromModule(require('../assets/gender_classification.tflite'));
-              await asset.downloadAsync();
-              genderModelRef.current = await loadTensorflowModel({ url: asset.localUri || asset.uri }, []);
-          } catch (e) { }
-      }
-  };
-
-  const detectFacesWithMLKit = async (uri) => {
-      try { return await FaceDetection.detect(uri); } catch (error) { return []; }
-  };
-
-  const checkGenderWithTFLite = async (croppedFaceUri) => {
-      try {
-          await loadGenderModelAsync();
-          if (!genderModelRef.current) return 0;
-
-          const inputTensor = genderModelRef.current.inputs?.[0];
-          const MODEL_WIDTH = inputTensor?.shape?.[1] || 224;
-          const MODEL_HEIGHT = inputTensor?.shape?.[2] || 224;
-          const isUint8 = inputTensor?.dataType === 'uint8' || inputTensor?.dataType === 'int8';
-
-          const resizedImage = await ImageManipulator.manipulateAsync(
-              croppedFaceUri, [{ resize: { width: MODEL_WIDTH, height: MODEL_HEIGHT } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-          );
-
-          const base64Data = await FileSystem.readAsStringAsync(resizedImage.uri, { encoding: FileSystem.EncodingType.Base64 });
-          const rawBuffer = new Uint8Array(decode(base64Data));
-          const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
-
-          const bufferSize = MODEL_WIDTH * MODEL_HEIGHT * 3 * (isUint8 ? 1 : 4);
-          const pureInputBuffer = new ArrayBuffer(bufferSize);
-          const inputData = isUint8 ? new Uint8Array(pureInputBuffer) : new Float32Array(pureInputBuffer);
-
-          let rgbIndex = 0;
-          for (let i = 0; i < rawImageData.data.length; i += 4) {
-              if (isUint8) {
-                  inputData[rgbIndex++] = rawImageData.data[i];     
-                  inputData[rgbIndex++] = rawImageData.data[i + 1]; 
-                  inputData[rgbIndex++] = rawImageData.data[i + 2]; 
-              } else {
-                  inputData[rgbIndex++] = rawImageData.data[i] / 255.0;     
-                  inputData[rgbIndex++] = rawImageData.data[i + 1] / 255.0; 
-                  inputData[rgbIndex++] = rawImageData.data[i + 2] / 255.0; 
-              }
-          }
-
-          const output = await genderModelRef.current.run([pureInputBuffer]);
-          let probability = 0;
-
-          if (output && output.length > 0) {
-              const rawOut = output[0];
-              let outBuffer;
-              if (rawOut instanceof ArrayBuffer) outBuffer = rawOut;
-              else if (rawOut && rawOut.buffer instanceof ArrayBuffer) outBuffer = rawOut.buffer;
-              else outBuffer = new Float32Array(rawOut).buffer;
-
-              const outTensor = genderModelRef.current.outputs?.[0];
-              if (outTensor?.dataType === 'uint8' || outTensor?.dataType === 'int8') {
-                  probability = new Uint8Array(outBuffer)[0] / 255.0;
-              } else {
-                  probability = new Float32Array(outBuffer)[0];
-              }
-          }
-
-          if (typeof probability !== 'number' || isNaN(probability)) probability = 0;
-          return probability;
-          
-      } catch (error) { 
-          return 0; 
-      }
-  };
-
-  const processFrameForGender = async (uri) => {
-      try {
-          const faces = await detectFacesWithMLKit(uri);
-          
-          if (faces && faces.length > 0) {
-              let hasFemale = false;
-              let hasMale = false;
-
-              for (let i = 0; i < faces.length; i++) {
-                  const face = faces[i];
-                  const box = face.frame || face.bounds || {}; 
-                  
-                  let originX = Math.floor(Math.max(0, box.left ?? box.x ?? box.originX ?? 0));
-                  let originY = Math.floor(Math.max(0, box.top ?? box.y ?? box.originY ?? 0));
-                  let width = Math.floor(Math.max(10, box.width ?? 0));
-                  let height = Math.floor(Math.max(10, box.height ?? 0));
-                  
-                  const croppedFace = await ImageManipulator.manipulateAsync(
-                      uri, [{ crop: { originX, originY, width, height } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-                  );
-                  
-                  const femaleProbability = await checkGenderWithTFLite(croppedFace.uri);
-                  
-                  if (femaleProbability >= 0.50) {
-                      hasFemale = true;
-                      break; 
-                  } else {
-                      hasMale = true;
-                  }
-              }
-              
-              if (hasFemale) return 'w';
-              if (hasMale) return 'm';
-          }
-          return 'none';
-      } catch (error) {
-          return 'none';
-      }
-  };
-
-  // 🚨 THE BUFFER SCANNER (TESTING MODE)
   useEffect(() => {
-      const bufferScanner = setInterval(async () => {
-          if (!player || player.duration <= 0 || isAiProcessingRef.current || !videoSource) return;
+      const frameScanner = setInterval(async () => {
+          // ভিডিও সোর্স না থাকলে বা প্লেয়ার রেডি না থাকলে কাজ করবে না
+          if (!player || player.duration <= 0 || isExtractingRef.current || !videoSource) return;
           
           let targetSec = targetScanSecRef.current;
           const duration = player.duration;
 
+          // ভিডিও শেষ হয়ে গেলে স্ক্যান বন্ধ
           if (targetSec > duration) return;
 
-          isAiProcessingRef.current = true;
+          isExtractingRef.current = true;
 
           try {
+              // 🚨 [PROBING THE LOADED BUFFER]
+              // এই ফাংশনটি স্ক্রিনশট নেয় না। এটি সরাসরি মেমোরিতে থাকা (Loaded) ভিডিও থেকে ফ্রেম কেটে আনে।
+              // যদি ভিডিও ওই পর্যন্ত লোড না হয়ে থাকে, তবে ২ সেকেন্ড পর এটি টাইমআউট হয়ে যাবে।
               const extractPromise = player.generateThumbnailsAsync([targetSec]);
               const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 2000));
               
               const thumbs = await Promise.race([extractPromise, timeoutPromise]);
 
               if (thumbs && thumbs.length > 0) {
-                  const result = await processFrameForGender(thumbs[0].uri);
+                  // ফ্রেম সফলভাবে কাটা হয়েছে
+                  console.log(`✅ [${targetSec}s] Frame cut from LOADED VIDEO -> ${thumbs[0].uri}`);
                   
-                  aiDataMapRef.current[targetSec] = result;
-                  
-                  let terminalLog = `\n--- 📊 AI DATA MAP (Loaded Buffer) ---\n`;
-                  Object.keys(aiDataMapRef.current)
-                      .map(Number)
-                      .sort((a,b) => a - b)
-                      .forEach(timeKey => {
-                          terminalLog += `${timeKey}-${aiDataMapRef.current[timeKey]}\n`;
-                      });
-                  console.log(terminalLog);
-                  
+                  // সফল হলে পরবর্তী ৩ সেকেন্ডের জন্য এগোবে
                   targetScanSecRef.current += 3;
+              } else {
+                  console.log(`⚠️ [${targetSec}s] Frame returned empty.`);
               }
 
           } catch(e) {
-              // Timeout - waiting for buffer
+              // TIMEOUT - তারমানে ভিডিও এখনো ওই সেকেন্ড পর্যন্ত ইন্টারনেট থেকে লোড (Buffer) হয়নি
+              console.log(`⏳ [${targetSec}s] Waiting for video to load...`);
+              // targetScanSecRef বাড়াবো না, পরেরবার আবার একই সেকেন্ডে ট্রাই করবে
           } finally {
-              isAiProcessingRef.current = false;
+              isExtractingRef.current = false;
           }
           
-      }, 1000); 
+      }, 1000); // প্রতি ১ সেকেন্ডে চেক করবে নতুন বাফার হলো কিনা
 
-      return () => clearInterval(bufferScanner);
+      return () => clearInterval(frameScanner);
   }, [player, videoSource]);
 
-  // 🤖 -------------------- AI ENGINE END -------------------- 🤖
+  // 🚨 -------------------- ENGINE END -------------------- 🚨
 
 
   useEffect(() => {
@@ -415,6 +287,7 @@ export default function GlobalPlayer() {
 
   if (playerState === 'hidden') return null;
   const isInteractiveFull = playerState === 'full' || playerState === 'center' || playerState === 'fullscreen';
+  const bufferedWidth = duration > 0 ? `${(buffered / duration) * 100}%` : '0%';
 
   return (
     <Animated.View 
@@ -456,7 +329,7 @@ export default function GlobalPlayer() {
              <View style={styles.bottomBar}>
                 <Text style={styles.timeTextLeft}>{formatTime(currentTime)}</Text>
                 <View style={styles.sliderWrapper}>
-                    <Slider style={{ flex: 1, height: 40 }} minimumValue={0} maximumValue={duration} value={currentTime} onValueChange={(v) => setCurrentTime(v)} minimumTrackTintColor="#FF0000" maximumTrackTintColor="transparent" thumbTintColor="#FF0000" />
+                    <Slider style={{ flex: 1, height: 40 }} minimumValue={0} maximumValue={duration} value={currentTime} onValueChange={(v) => setCurrentTime(v)} onSlidingComplete={async (v) => { await seekTo(v); triggerControls(); }} minimumTrackTintColor="#FF0000" maximumTrackTintColor="transparent" thumbTintColor="#FF0000" />
                 </View>
                 <Text style={styles.timeTextRight}>{formatTime(duration)}</Text>
                 <TouchableOpacity style={{marginLeft: 12}} onPress={toggleFullscreen}><Ionicons name={isFullscreen ? "contract" : "expand"} size={22} color="#FFF" /></TouchableOpacity>
