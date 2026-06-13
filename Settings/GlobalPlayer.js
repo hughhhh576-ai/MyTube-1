@@ -105,11 +105,18 @@ export default function GlobalPlayer() {
       }
   };
 
+  // 🚨 [THE FIX] Video Auto-Play Lifecycle 
   const player = useVideoPlayer(videoSource, (p) => {
     if (!videoSource) return; 
     try { p.loop = false; } catch(e) {}
     safeSetRate(p, currentSpeed);
-    if (streamModeRef.current === 'separate' && !isAudioModeRef.current) safeSetMuted(p, true); else safeSetMuted(p, false);
+    if (streamModeRef.current === 'separate' && !isAudioModeRef.current) {
+        safeSetMuted(p, true); 
+    } else {
+        safeSetMuted(p, false);
+    }
+    // 🚨 ভিডিও সোর্স লোড হওয়া মাত্রই প্লে করবে!
+    safePlay(p);
   });
 
   const triggerControls = () => {
@@ -216,12 +223,9 @@ export default function GlobalPlayer() {
 
   const startPlayback = async (json) => {
     setStreamMode(json.streamType || 'combined'); streamModeRef.current = json.streamType || 'combined';
-    setStreamUrl(json.url); setVideoSource(json.url); 
-    
-    // 🚨 [FIX] ভিডিও লোড হওয়ার সাথে সাথে অটো-প্লে ট্রিগার করা হলো
-    setTimeout(() => {
-        if (player) safePlay(player);
-    }, 1000);
+    setStreamUrl(json.url); 
+    // 🚨 State update will trigger the `useVideoPlayer` callback to auto-play
+    setVideoSource(json.url); 
   };
 
 
@@ -255,7 +259,6 @@ export default function GlobalPlayer() {
               croppedFaceUri, [{ resize: { width: MODEL_WIDTH, height: MODEL_HEIGHT } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
           );
 
-          // 🚨 FileSystem.readAsStringAsync এর জন্য legacy import ব্যবহার না করাই ভালো
           const base64Data = await FileSystem.readAsStringAsync(resizedImage.uri, { encoding: FileSystem.EncodingType.Base64 });
           const rawBuffer = new Uint8Array(decode(base64Data));
           const rawImageData = jpeg.decode(rawBuffer, { useTArray: true });
@@ -343,7 +346,7 @@ export default function GlobalPlayer() {
       }
   };
 
-  // 🚨 [THE ZERO-DATA + CACHED SPRITE SOLUTION]
+  // 🚨 [THE ZERO-DATA SPRITE SOLUTION]
   const SB_COLS = 5;
   const SB_ROWS = 5;
   const SB_FRAME_W = 160;
@@ -357,7 +360,6 @@ export default function GlobalPlayer() {
 
       const processQueue = async () => {
           
-          // ১. ভিডিও প্লে হওয়া পর্যন্ত অপেক্ষা করবে
           while (isQueueActive) {
               if (player && player.playing && player.duration > 0) break;
               await new Promise(r => setTimeout(r, 500));
@@ -365,7 +367,6 @@ export default function GlobalPlayer() {
 
           if (!isQueueActive) return;
 
-          // ২. ভিডিও প্লেয়ারকে বাফার করার জন্য ২ সেকেন্ড সময় দেওয়া হলো
           console.log("⏸️ Video started! Giving player 2s to buffer...");
           await new Promise(r => setTimeout(r, 2000));
 
@@ -408,17 +409,13 @@ export default function GlobalPlayer() {
                   
                   const currentGridUrl = storyboardUrlTemplate.replace('$M', chunkNumber).replace('$L', '0').replace('$N', '0');
 
-                  // 🚨 [NETWORK FIX]: ডাউনলোড ক্যাশিং
                   const localChunkPath = `${FileSystem.cacheDirectory}sb_chunk_${chunkNumber}.jpg`;
                   const chunkInfo = await FileSystem.getInfoAsync(localChunkPath);
 
-                  // যদি ছবিটি ফোনে না থাকে, তবেই শুধু একবার ডাউনলোড করবে
                   if (!chunkInfo.exists) {
-                      console.log(`📥 Downloading Sprite Chunk ${chunkNumber} ONCE...`);
                       await FileSystem.downloadAsync(currentGridUrl, localChunkPath);
                   }
 
-                  // 🚨 ইন্টারনেট থেকে নয়, লোকাল মেমোরি থেকে ফ্রেম কাটা হচ্ছে!
                   const croppedFrame = await ImageManipulator.manipulateAsync(
                       localChunkPath, 
                       [{ crop: { originX: cropX, originY: cropY, width: SB_FRAME_W, height: SB_FRAME_H } }], 
@@ -445,7 +442,6 @@ export default function GlobalPlayer() {
                   targetScanSecRef.current += SB_INTERVAL;
               }
 
-              // ইঞ্জিনকে নিঃশ্বাস নেওয়ার সময় দেওয়া হলো
               await new Promise(r => setTimeout(r, 500)); 
           }
       };
